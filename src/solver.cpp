@@ -362,13 +362,13 @@ void test_heston_call(){
     const double eta = 0.04;
     
     // Test parameters matching Python version
-    const int m1 = 500;
-    const int m2 = 300;
+    const int m1 = 300;
+    const int m2 = 100;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     const int m = (m1 + 1) * (m2 + 1);
 
-    const int N = 100;
+    const int N = 20;
     const double delta_t = T / N;
     const double theta = 0.8;
     std::cout << "Time Dimension: " << N << std::endl;

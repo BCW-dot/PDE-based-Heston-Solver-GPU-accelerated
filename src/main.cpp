@@ -12,7 +12,7 @@
 #include "BoundaryConditions.hpp"
 
 #include "solver.hpp"
-#include "bs.hpp"
+
 
 #include <iostream>
 
@@ -41,8 +41,6 @@ int main(int argc, char* argv[]) {
     //test_boundary_conditions();
 
     test_DO_scheme();
-
-    //test_DO_scheme_optimized();
 
 
 

@@ -171,8 +171,8 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
             Y_1(i) = rhs;  // Reuse Y_1 to store RHS
         });
 
-        //A2.solve_implicit(U, Y_1);  // Y_1 contains RHS, result in U
-        std::this_thread::sleep_for(std::chrono::duration<double>(0.0005));
+        A2.solve_implicit(U, Y_1);  // Y_1 contains RHS, result in U
+        //std::this_thread::sleep_for(std::chrono::duration<double>(0.0005));
     }
 
     auto t_end = timer::now();
