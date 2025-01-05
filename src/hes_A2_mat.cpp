@@ -76,7 +76,7 @@ void heston_A2Storage_gpu::build_matrix(const Grid& grid, double rho, double sig
             /*
             if(grid.Vec_v[j] > 1.0) {
                 // Using l_9a = [-2,-1,0] for upwind scheme
-                h_loer2.push_back();
+                h_lower2.push_back();
                 h_lower[] += temp * alpha_v(j, -2, grid.Delta_v);
                 h_main[] += temp * alpha_v(j, -1, grid.Delta_v);
                 h_upper[] += temp * alpha_v(j, 0, grid.Delta_v);
@@ -421,10 +421,13 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
             if(j == 0) {
                 // v=0 case: uses gamma coefficients
                 h_main(i, j) += temp * gamma_v(j, 0, grid.Delta_v);
+                //std::cout << h_main(i, 0) << std::endl;
+                //std::cout << h_main(1,0) << std::endl;
                 h_upper(i, j) += temp * gamma_v(j, 1, grid.Delta_v);
                 h_upper2(i, j) += temp * gamma_v(j, 2, grid.Delta_v);
             } 
-            if(grid.Vec_v[j] > 1.0) {
+            /*
+            else if(grid.Vec_v[j] > 1.0) {
                 // High variance case: uses alpha coefficients
                 h_lower2(i, j-2) += temp * alpha_v(j, -2, grid.Delta_v);
                 h_lower(i, j-1) += temp * alpha_v(j, -1, grid.Delta_v);
@@ -435,6 +438,19 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
                 h_main(i, j) += temp2 * delta_v(j-1, 0, grid.Delta_v);
                 h_upper(i, j) += temp2 * delta_v(j-1, 1, grid.Delta_v);
             } 
+            */
+            else if(grid.Vec_v[j] > 1.0) {
+                // High variance case: uses alpha coefficients
+                h_lower2(i, j-1) += temp * alpha_v(j, -2, grid.Delta_v);
+                h_lower(i, j) += temp * alpha_v(j, -1, grid.Delta_v);
+                h_main(i, j+1) += temp * alpha_v(j, 0, grid.Delta_v);
+
+                // Add diffusion terms
+                h_lower(i, j-1) += temp2 * delta_v(j-1, -1, grid.Delta_v);
+                h_main(i, j) += temp2 * delta_v(j-1, 0, grid.Delta_v);
+                h_upper(i, j) += temp2 * delta_v(j-1, 1, grid.Delta_v);
+            } 
+            
             else {
                 // Standard case: uses beta coefficients
                 h_lower(i, j-1) += temp * beta_v(j-1, -1, grid.Delta_v) + 
@@ -511,8 +527,8 @@ void heston_A2_shuffled::build_implicit(const double theta, const double delta_t
 
 void test_heston_A2_shuffled() {
     // Test dimensions
-    int m1 = 5;
-    int m2 = 5;
+    int m1 = 4;
+    int m2 = 20;
     Grid grid = create_test_grid(m1, m2);
     
     // Create and build A2 matrix
@@ -594,16 +610,27 @@ void test_heston_A2_shuffled() {
 
     // Test implicit solve
     using timer = std::chrono::high_resolution_clock;
-    auto t_start = timer::now();
-    A2.solve_implicit(x, b);
-    auto t_end = timer::now();
-    
-    std::cout << "Implicit solve time: "
-                << std::chrono::duration<double>(t_end - t_start).count()
-                << " seconds" << std::endl;
+    for(int i = 0; i<5; i++){
+        auto t_start = timer::now();
+        A2.solve_implicit(x, b);
+        auto t_end = timer::now();
+
+        std::cout << "Implicit solve time: "
+                    << std::chrono::duration<double>(t_end - t_start).count()
+                    << " seconds" << std::endl;
+    }
 
     // Verify solution by computing residual
-    A2.multiply(x, result);
+    std::cout << std::endl;
+    for(int i = 0; i<5; i++){
+        auto t_start = timer::now();
+        A2.multiply(x, result);
+        auto t_end = timer::now();
+
+        std::cout << "Explicit solve time: "
+                    << std::chrono::duration<double>(t_end - t_start).count()
+                    << " seconds" << std::endl;
+    }
     
     // Compute residual
     auto h_result = Kokkos::create_mirror_view(result);
