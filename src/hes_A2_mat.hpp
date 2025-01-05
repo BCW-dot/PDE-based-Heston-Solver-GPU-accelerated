@@ -1,0 +1,277 @@
+#pragma once
+
+#include <Kokkos_Core.hpp>
+#include "grid.hpp"
+#include "coeff.hpp"
+
+/*
+
+A2 class
+
+*/
+class heston_A2Storage_gpu {
+private:
+    int m1, m2;
+    
+    // Explicit system diagonals
+    Kokkos::View<double*> main_diag;     // (m2-1)*(m1+1)
+    Kokkos::View<double*> lower_diag;    // (m2-2)*(m1+1)
+    Kokkos::View<double*> upper_diag;    // (m2-1)*(m1+1)
+    Kokkos::View<double*> upper2_diag;   // m1+1
+
+    // Implicit system diagonals
+    Kokkos::View<double*> implicit_main_diag;   // (m2+1)*(m1+1)
+    Kokkos::View<double*> implicit_lower_diag;  // (m2-2)*(m1+1)
+    Kokkos::View<double*> implicit_upper_diag;  // (m2-1)*(m1+1)
+    Kokkos::View<double*> implicit_upper2_diag; // m1+1
+
+    // Persistent temporary storage for implicit solve
+    Kokkos::View<double*> c_star;   
+    Kokkos::View<double*> c2_star;  
+    Kokkos::View<double*> d_star;
+
+public:
+    KOKKOS_FUNCTION
+    heston_A2Storage_gpu() = default;
+
+    heston_A2Storage_gpu(int m1_in, int m2_in);
+
+    void build_matrix(const Grid& grid, double rho, double sigma, double r_d, double kappa, double eta);
+
+    void build_implicit(const double theta, const double delta_t);
+
+    // Multiply function - kept inline for performance
+    inline void multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result);
+
+    // Multiply function parallel in stock and variance - kept inline for performance
+    inline void multiply_parallel_s_and_v(const Kokkos::View<double*>& x, Kokkos::View<double*>& result);
+
+
+    // Solve implicit function - kept inline for performance
+    inline void solve_implicit(Kokkos::View<double*>& x, const Kokkos::View<double*>& b);
+
+    // Getters
+    KOKKOS_INLINE_FUNCTION int get_m1() const { return m1; }
+    KOKKOS_INLINE_FUNCTION int get_m2() const { return m2; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_main_diag() const { return main_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_lower_diag() const { return lower_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_upper_diag() const { return upper_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_upper2_diag() const { return upper2_diag; }
+};
+
+/*
+inline void heston_A2Storage_gpu::multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
+    const int local_m1 = m1;
+    const int local_m2 = m2;
+
+    const auto local_main = main_diag;
+    const auto local_lower = lower_diag;
+    const auto local_upper = upper_diag;
+    const auto local_upper2 = upper2_diag;
+
+    const int spacing = local_m1 + 1;
+    
+    // First set result to zero
+    Kokkos::deep_copy(result, 0.0);
+    
+    Kokkos::parallel_for("multiply", Kokkos::RangePolicy<>(0, local_m2 - 1), KOKKOS_LAMBDA(const int j) {
+        if (j == 0) {
+            // First block (j=0)
+            for (int i = 0; i < spacing; i++) {
+                double temp = local_main(i) * x(i);
+                temp += local_upper(i) * x(i + spacing);
+                temp += local_upper2(i) * x(i + 2 * spacing);
+                result(i) = temp;
+            }
+        } 
+        else {
+            // Handle remaining blocks
+            int block_start = j * spacing;
+            for (int i = 0; i < spacing; i++) {
+                int idx = block_start + i;
+                double temp = local_lower(idx - spacing) * x(idx - spacing);
+                temp += local_main(idx) * x(idx);
+                temp += local_upper(idx) * x(idx + spacing);
+                result(idx) = temp;
+            }
+        }
+    });
+    Kokkos::fence();
+}
+*/
+
+inline void heston_A2Storage_gpu::multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
+    const int local_m1 = m1;
+    const int local_m2 = m2;
+
+    const auto local_main = main_diag;
+    const auto local_lower = lower_diag;
+    const auto local_upper = upper_diag;
+    const auto local_upper2 = upper2_diag;
+
+    const int spacing = m1 + 1;
+    //Kokkos::deep_copy(result, 0.0);
+    
+    
+    Kokkos::parallel_for("multiply", 1, KOKKOS_LAMBDA(const int) {
+        // First block (j=0)
+        for(int i = 0; i < spacing; i++) {
+            double temp = local_main(i) * x(i);
+            temp += local_upper(i) * x(i + spacing);
+            temp += local_upper2(i) * x(i + 2*spacing);
+            result(i) = temp;
+        }
+
+        // Handle remaining blocks
+        for(int i = spacing; i < (local_m2-1)*(local_m1+1); i++) {
+            double temp = local_lower(i-spacing) * x(i-spacing);
+            temp += local_main(i) * x(i);
+            temp += local_upper(i) * x(i + spacing);
+            result(i) = temp;
+        }
+
+        //Handle remaining zero entries
+        for(int i = (local_m2-1)*(local_m1+1); i < (local_m1+1)*(local_m2+1); i++) {
+            result(i) = 0;
+        }
+        
+    });
+    Kokkos::fence();
+}
+
+inline void heston_A2Storage_gpu::multiply_parallel_s_and_v(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
+    const int local_m1 = m1;
+    const int local_m2 = m2;
+    const auto local_main = main_diag;
+    const auto local_lower = lower_diag;
+    const auto local_upper = upper_diag;
+    const auto local_upper2 = upper2_diag;
+    const int spacing = local_m1 + 1;
+
+    // Define team policy: one team per variance level j
+    using team_policy = Kokkos::TeamPolicy<>;
+    using member_type = team_policy::member_type;
+
+    //Kokkos::deep_copy(result, 0.0);
+
+    Kokkos::parallel_for("A2_multiply",
+        team_policy(local_m2 - 1, Kokkos::AUTO),  // One team per variance block
+        KOKKOS_LAMBDA(const member_type& team_member) {
+            const int j = team_member.league_rank();
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team_member, spacing), [=](const int i) {
+                if (j == 0) {
+                    // First variance block
+                    double temp = local_main(i)*x(i)
+                                + local_upper(i)*x(i+spacing)
+                                + local_upper2(i)*x(i+2*spacing);
+                    result(i) = temp;
+                } else {
+                    // Subsequent variance blocks
+                    int idx = j*spacing + i;
+                    double temp = local_lower(idx-spacing)*x(idx-spacing)
+                                + local_main(idx)*x(idx)
+                                + local_upper(idx)*x(idx+spacing);
+                    result(idx) = temp;
+                }
+            });
+        }
+    );
+
+    // Now zero out the remaining elements
+    int start_zero = (local_m2 - 1)*spacing;
+    int end_zero = (local_m2 + 1)*spacing; // total size = (m1+1)*(m2+1)
+
+    Kokkos::parallel_for("A2_zero_tail", Kokkos::RangePolicy<>(start_zero, end_zero), KOKKOS_LAMBDA(const int i) {
+        result(i) = 0.0;
+    });
+
+    Kokkos::fence();
+}
+
+
+inline void heston_A2Storage_gpu::solve_implicit(Kokkos::View<double*>& x, const Kokkos::View<double*>& b) {
+    const int local_m1 = m1;
+    const int local_m2 = m2;
+    const int spacing = local_m1 + 1;
+    const int num_rows = (local_m2 - 1) * spacing;
+    const int total_size = (local_m2 + 1) * spacing;
+
+
+    auto local_c_star = c_star;
+    auto local_c2_star = c2_star;
+    auto local_d_star = d_star;
+
+    // Get diagonal arrays
+    const auto local_impl_main = implicit_main_diag;
+    const auto local_impl_lower = implicit_lower_diag;
+    const auto local_impl_upper = implicit_upper_diag;
+    const auto local_impl_upper2 = implicit_upper2_diag;
+
+    //Debugging the DO scheme solver. Before we compute anything we set the results to zero
+    //Kokkos::deep_copy(x, 0.0);
+
+    Kokkos::parallel_for("solve_implicit", 1, KOKKOS_LAMBDA(const int) {
+        // Identity block
+        for (int i = num_rows; i < total_size; i++) {
+            local_d_star(i) = b(i);
+        }
+
+        
+        // Normalize first m1+1 rows and upper2_diagonal
+        for (int i = 0; i < spacing; i++) {
+            local_c_star(i) = local_impl_upper(i) / local_impl_main(i);
+            local_c2_star(i) = local_impl_upper2(i) / local_impl_main(i);
+            local_d_star(i) = b(i) / local_impl_main(i);
+        }
+
+        // First block forward sweep (handle upper2_diag)
+        for (int i = 0; i < spacing; i++) {
+            double c_upper = local_impl_upper(i + spacing) - local_c2_star(i) * local_impl_lower(i);
+            double m = 1.0 / (local_impl_main(i + spacing) - local_c_star(i) * local_impl_lower(i));
+            local_c_star(i + spacing) = c_upper * m;
+            local_d_star(i + spacing) = (b(i + spacing) - local_impl_lower(i) * local_d_star(i)) * m;
+        }
+
+        // Middle blocks forward sweep
+        for (int i = spacing; i < num_rows - spacing; i++) {
+            double m = 1.0 / (local_impl_main(i + spacing) - local_c_star(i) * local_impl_lower(i));
+            local_c_star(i + spacing) = local_impl_upper(i + spacing) * m;
+            local_d_star(i + spacing) = (b(i + spacing) - local_impl_lower(i) * local_d_star(i)) * m;
+        }
+
+        // Pre-backward sweep
+        for (int i = num_rows - spacing; i < num_rows; i++) {
+            local_d_star(i) -= local_d_star(i + spacing) * local_c_star(i);
+        }
+
+        // Last m1+1 rows
+        for (int i = num_rows - spacing; i < num_rows; i++) {
+            x(i) = local_d_star(i);
+        }
+
+        // Backward sweep
+        for (int i = num_rows - 1; i >= 3 * spacing; i--) {
+            x(i - spacing) = local_d_star(i - spacing) - local_c_star(i - spacing) * x(i);
+        }
+
+        // First block back substitution with upper2_diag
+        for (int i = 3 * spacing - 1; i >= 2 * spacing; i--) {
+            x(i - spacing) = local_d_star(i - spacing) - local_c_star(i - spacing) * x(i);
+            local_d_star(i - 2 * spacing) -= local_c2_star(i - 2 * spacing) * x(i);
+        }
+
+        // Last backward substitution
+        for (int i = 2 * spacing - 1; i >= spacing; i--) {
+            x(i - spacing) = local_d_star(i - spacing) - local_c_star(i - spacing) * x(i);
+        }
+
+        // Identity block
+        for (int i = num_rows; i < total_size; i++) {
+            x(i) = local_d_star(i);
+        }
+    });
+    Kokkos::fence();
+}
+
+
+void test_heston_A2_mat();

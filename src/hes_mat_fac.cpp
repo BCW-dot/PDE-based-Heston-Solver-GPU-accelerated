@@ -1,0 +1,2382 @@
+#include "hes_mat_fac.hpp"
+#include <iostream>
+
+//for std::setprec() output debugging of flatten A1
+#include <iomanip>
+
+/*
+
+A0 class constructor and build function
+
+*/
+heston_A0Storage_gpu::heston_A0Storage_gpu(int m1_in, int m2_in) 
+    : m1(m1_in), m2(m2_in) {
+    values = Kokkos::View<double**>("A0_values", m2 - 1, (m1 - 1) * 9);
+}
+
+void heston_A0Storage_gpu::build_matrix(const Grid& grid, double rho, double sigma) {
+    auto values_host = Kokkos::create_mirror_view(values);
+    Kokkos::deep_copy(values_host, 0.0);
+
+    for(int j = 0; j < m2-1; ++j) {
+        for(int i = 0; i < m1-1; ++i) {
+            double c = rho * sigma * grid.Vec_s[i+1] * grid.Vec_v[j+1];
+
+            for(int k = -1; k <= 1; ++k) {
+                for(int l = -1; l <= 1; ++l) {
+                    double beta_s_val = beta_s(i, k, grid.Delta_s);
+                    double beta_v_val = beta_v(j, l, grid.Delta_v);
+                    
+                    int idx = i * 9 + (l + 1) * 3 + (k + 1);
+                    values_host(j, idx) = c * beta_s_val * beta_v_val;
+                }
+            }
+        }
+    }
+
+    Kokkos::deep_copy(values, values_host);
+}
+
+
+/*
+
+A1 class constructor and build function
+
+*/
+heston_A1Storage_gpu::heston_A1Storage_gpu(int m1_in, int m2_in) : m1(m1_in), m2(m2_in) {
+    main_diags = Kokkos::View<double**>("A1_main_diags", m2+1, m1+1);
+    lower_diags = Kokkos::View<double**>("A1_lower_diags", m2+1, m1);
+    upper_diags = Kokkos::View<double**>("A1_upper_diags", m2+1, m1);
+
+    implicit_main_diags = Kokkos::View<double**>("A1_impl_main_diags", m2+1, m1+1);
+    implicit_lower_diags = Kokkos::View<double**>("A1_impl_lower_diags", m2+1, m1);
+    implicit_upper_diags = Kokkos::View<double**>("A1_impl_upper_diags", m2+1, m1);
+
+    temp_sequ = Kokkos::View<double*>("temp_sequ", m1+1);
+    temp_para = Kokkos::View<double**>("temp_para", m2 + 1, m1 + 1);
+}
+
+void heston_A1Storage_gpu::build_matrix(const Grid& grid, double rho, double sigma, double r_d, double r_f) {
+    auto main_diags_host = Kokkos::create_mirror_view(main_diags);
+    auto lower_diags_host = Kokkos::create_mirror_view(lower_diags);
+    auto upper_diags_host = Kokkos::create_mirror_view(upper_diags);
+    
+    Kokkos::deep_copy(main_diags_host, 0.0);
+    Kokkos::deep_copy(lower_diags_host, 0.0);
+    Kokkos::deep_copy(upper_diags_host, 0.0);
+
+    // For j in range(m2 + 1)
+    for(int j = 0; j <= m2; j++) {
+        for(int i = 1; i < m1; i++) {
+            double a = 0.5 * grid.Vec_s[i] * grid.Vec_s[i] * grid.Vec_v[j];
+            double b = (r_d - r_f) * grid.Vec_s[i];
+            
+            // Populate diagonals using central difference coefficients
+            lower_diags_host(j, i-1) = a * delta_s(i-1, -1, grid.Delta_s) + 
+                                    b * beta_s(i-1, -1, grid.Delta_s);
+            main_diags_host(j, i) = a * delta_s(i-1, 0, grid.Delta_s) + 
+                                b * beta_s(i-1, 0, grid.Delta_s) - 0.5 * r_d;
+            upper_diags_host(j, i) = a * delta_s(i-1, 1, grid.Delta_s) + 
+                                    b * beta_s(i-1, 1, grid.Delta_s);
+        }
+        // Add boundary term
+        main_diags_host(j, m1) = -0.5 * r_d;
+    }
+
+    Kokkos::deep_copy(main_diags, main_diags_host);
+    Kokkos::deep_copy(lower_diags, lower_diags_host);
+    Kokkos::deep_copy(upper_diags, upper_diags_host);
+}
+
+void heston_A1Storage_gpu::build_implicit(const double theta, const double delta_t) {
+    const int local_m1 = m1;
+    const int local_m2 = m2;
+    const auto local_main = main_diags;
+    const auto local_lower = lower_diags;  
+    const auto local_upper = upper_diags;
+    const auto local_impl_main = implicit_main_diags;
+    const auto local_impl_lower = implicit_lower_diags;
+    const auto local_impl_upper = implicit_upper_diags;
+
+    Kokkos::parallel_for("build_implicit", 1, KOKKOS_LAMBDA(const int) {
+        for(int j = 0; j <= local_m2; j++) {
+            for(int i = 0; i <= local_m1; i++) {
+                local_impl_main(j,i) = 1.0 - theta * delta_t * local_main(j,i);
+            }
+            for(int i = 0; i < local_m1; i++) {
+                local_impl_lower(j,i) = -theta * delta_t * local_lower(j,i);
+                local_impl_upper(j,i) = -theta * delta_t * local_upper(j,i);
+            }
+        }
+    });
+    Kokkos::fence();
+}
+
+/*
+
+A2 class constructor and build function
+
+*/
+/*
+heston_A2Storage_gpu::heston_A2Storage_gpu(int m1_in, int m2_in) : m1(m1_in), m2(m2_in) {
+    main_diag = Kokkos::View<double*>("A2_main_diag", (m2-1)*(m1+1));
+    lower_diag = Kokkos::View<double*>("A2_lower_diag", (m2-2)*(m1+1));
+    upper_diag = Kokkos::View<double*>("A2_upper_diag", (m2-1)*(m1+1));
+    upper2_diag = Kokkos::View<double*>("A2_upper2_diag", m1+1);
+
+    implicit_main_diag = Kokkos::View<double*>("A2_impl_main_diag", (m2+1)*(m1+1));
+    implicit_lower_diag = Kokkos::View<double*>("A2_impl_lower_diag", (m2-2)*(m1+1));
+    implicit_upper_diag = Kokkos::View<double*>("A2_impl_upper_diag", (m2-1)*(m1+1));
+    implicit_upper2_diag = Kokkos::View<double*>("A2_impl_upper2_diag", m1+1);
+}
+
+
+void heston_A2Storage_gpu::build_matrix(const Grid& grid, double rho, double sigma, double r_d, 
+                                      double kappa, double eta) {
+    std::cout<< "in functionm";
+    auto h_main = Kokkos::create_mirror_view(main_diag);
+    auto h_lower = Kokkos::create_mirror_view(lower_diag);
+    auto h_upper = Kokkos::create_mirror_view(upper_diag);
+    auto h_upper2 = Kokkos::create_mirror_view(upper2_diag);
+    
+    Kokkos::deep_copy(h_main, 0.0);
+    Kokkos::deep_copy(h_lower, 0.0);
+    Kokkos::deep_copy(h_upper, 0.0);
+    Kokkos::deep_copy(h_upper2, 0.0);
+
+    int spacing = m1+1;
+
+    // Handle j=0 case first
+    for(int i = 0; i < m1+1; i++) {
+        double temp = kappa * (eta - grid.Vec_v[0]);
+        // Use l_9c = [0,1,2]
+        h_main(i) += temp * gamma_v(0, 0, grid.Delta_v);
+        h_upper(i) += temp * gamma_v(0, 1, grid.Delta_v);
+        h_upper2(i) = temp * gamma_v(0, 2, grid.Delta_v);
+    }
+
+    // Handle remaining j values
+    for(int j = 1; j < m2-1; j++) {
+        for(int i = 0; i < m1+1; i++) {
+            double temp = kappa * (eta - grid.Vec_v[j]);
+            double temp2 = 0.5 * sigma * sigma * grid.Vec_v[j];
+
+            if(grid.Vec_v[j] > 1.0) {
+                int main_idx = i + (j+1)*(m1+1);
+                // Using l_9a = [-2,-1,0]
+                if(j > 0) h_lower[main_idx-spacing] += temp * alpha_v(j, -2, grid.Delta_v);
+                h_lower[main_idx] += temp * alpha_v(j, -1, grid.Delta_v);
+                h_main[main_idx] += temp * alpha_v(j, 0, grid.Delta_v);
+
+                // Add regular central differences
+                for(int k = -1; k <= 1; k++) {
+                    int idx = j > 0 ? main_idx + k*spacing : i + k*spacing;
+                    if(k == -1) h_lower[idx] += temp2 * delta_v(j-1, k, grid.Delta_v);
+                    else if(k == 0) h_main[main_idx] += temp2 * delta_v(j-1, k, grid.Delta_v);
+                    else h_upper[main_idx] += temp2 * delta_v(j-1, k, grid.Delta_v);
+                }
+            } else {
+                int main_idx = i + j*(m1+1);
+                for(int k = -1; k <= 1; k++) {
+                    if(k == -1 && j > 0) {
+                        h_lower[main_idx] += (temp * beta_v(j-1, k, grid.Delta_v) + 
+                                            temp2 * delta_v(j-1, k, grid.Delta_v));
+                    }
+                    else if(k == 0) {
+                        h_main[main_idx] += (temp * beta_v(j-1, k, grid.Delta_v) + 
+                                           temp2 * delta_v(j-1, k, grid.Delta_v));
+                    }
+                    else {
+                        h_upper[main_idx] += (temp * beta_v(j-1, k, grid.Delta_v) + 
+                                            temp2 * delta_v(j-1, k, grid.Delta_v));
+                    }
+                }
+            }
+            h_main[i + j*(m1+1)] += -0.5 * r_d;
+        }
+    }
+
+    Kokkos::deep_copy(main_diag, h_main);
+    Kokkos::deep_copy(lower_diag, h_lower);
+    Kokkos::deep_copy(upper_diag, h_upper);
+    Kokkos::deep_copy(upper2_diag, h_upper2);
+}
+
+void heston_A2Storage_gpu::build_implicit(const double theta, const double delta_t) {
+    Kokkos::parallel_for("build_implicit", 1, KOKKOS_LAMBDA(const int) {
+        // Initialize implicit_main_diag with identity
+        for(int i = 0; i < (m2+1)*(m1+1); i++) {
+            implicit_main_diag(i) = 1.0;
+        }
+
+        // Subtract theta*delta_t*A2 from main diagonal where A2 is defined
+        for(int i = 0; i < (m2-1)*(m1+1); i++) {
+            implicit_main_diag(i) -= theta * delta_t * main_diag(i);
+        }
+
+        // Build the off-diagonal terms
+        for(int i = 0; i < (m2-2)*(m1+1); i++) {
+            implicit_lower_diag(i) = -theta * delta_t * lower_diag(i);
+        }
+
+        for(int i = 0; i < (m2-1)*(m1+1); i++) {
+            implicit_upper_diag(i) = -theta * delta_t * upper_diag(i);
+        }
+
+        for(int i = 0; i < m1+1; i++) {
+            implicit_upper2_diag(i) = -theta * delta_t * upper2_diag(i);
+        }
+    });
+    Kokkos::fence();
+}
+*/
+
+
+
+/*
+struct heston_A0Storage_gpu {
+    int m1, m2;
+    Kokkos::View<double**> values; // [m2 - 1][(m1 - 1) * 9]
+
+    heston_A0Storage_gpu(int m1_in, int m2_in) : m1(m1_in), m2(m2_in) {
+        // Allocate the values View
+        values = Kokkos::View<double**>("A0_values", m2 - 1, (m1 - 1) * 9);
+    }
+
+    // Initialize the matrix
+    void build_matrix(const Grid& grid, double rho, double sigma) {
+        auto values_host = Kokkos::create_mirror_view(values);
+        
+        // Set everything to zero initially
+        Kokkos::deep_copy(values_host, 0.0);
+
+        // Python's range(1, m2) and range(1, m1)
+        for(int j = 0; j < m2-1; ++j) {  // j maps to j+1 in Python
+            for(int i = 0; i < m1-1; ++i) { // i maps to i+1 in Python
+                double c = rho * sigma * grid.Vec_s[i+1] * grid.Vec_v[j+1];
+
+                // Loop over k and l as in Python's l_11
+                for(int k = -1; k <= 1; ++k) {
+                    for(int l = -1; l <= 1; ++l) {
+                        // Calculate beta coefficients
+                        double beta_s_val = beta_s(i, k, grid.Delta_s);
+                        double beta_v_val = beta_v(j, l, grid.Delta_v);
+                        
+                        // Store in flattened format
+                        // Convert k,l to linear index in range [0,8]
+                        int idx = i * 9 + (l + 1) * 3 + (k + 1);
+                        values_host(j, idx) = c * beta_s_val * beta_v_val;
+                    }
+                }
+            }
+        }
+
+        // Copy to device
+        Kokkos::deep_copy(values, values_host);
+    }
+
+    // Sequential multiply method (runs on one thread on the GPU)
+    void multiply_seq(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) const {
+        int total_size = x.size();
+        int m1_ = m1;
+        int m2_ = m2;
+        auto values_ = values;
+        auto x_ = x;
+        auto result_ = result;
+
+        // Run on a single thread
+        Kokkos::parallel_for("A0_multiply_seq", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0, 1), KOKKOS_LAMBDA(const int&) {
+            for (int j = 0; j < m2_ - 1; ++j) {
+                int row_offset = (j + 1) * (m1_ + 1);
+                for (int i = 0; i < m1_ - 1; ++i) {
+                    double sum = 0.0;
+                    for (int l = -1; l <= 1; ++l) {
+                        for (int k = -1; k <= 1; ++k) {
+                            int val_idx = i * 9 + (l + 1) * 3 + (k + 1);
+                            int col_idx = (i + 1 + k) + (j + 1 + l) * (m1_ + 1);
+                            if (col_idx >= 0 && col_idx < total_size) {
+                                sum += values_(j, val_idx) * x_(col_idx);
+                            }
+                        }
+                    }
+                    result_(row_offset + i + 1) += sum;
+                }
+            }
+        });
+        Kokkos::fence();
+    }
+
+};
+
+void test_heston_A0() {
+   int m1 = 5;
+   int m2 = 5;
+   
+   // Create grid
+   Grid grid = create_test_grid(m1, m2);
+   
+   // Create and build A0 matrix
+   heston_A0Storage_gpu A0(m1, m2);
+   double rho = -0.9;
+   double sigma = 0.3;
+   A0.build_matrix(grid, rho, sigma);
+   
+   // Get host copy
+   auto values_host = Kokkos::create_mirror_view(A0.values);
+   Kokkos::deep_copy(values_host, A0.values);
+   
+   // Print matrix structure
+   std::cout << "A0 Matrix Structure:" << std::endl;
+   std::cout << "--------------------" << std::endl;
+   
+   for(int j = 0; j < m2-1; ++j) {
+       std::cout << "\nVariance level j=" << j << ":" << std::endl;
+       for(int i = 0; i < m1-1; ++i) {
+           std::cout << "Row " << i << ": ";
+           for(int val = 0; val < 9; ++val) {
+               std::cout << values_host(j, i*9 + val) << " ";
+           }
+           std::cout << std::endl;
+       }
+   }
+   
+   // Print dimensions
+   std::cout << "\nDimensions:" << std::endl;
+   std::cout << "Values shape: [" << m2-1 << "][" << (m1-1)*9 << "]" << std::endl;
+}
+*/
+//A0 class test
+void test_heston_A0() {
+    {
+        int m1 = 5;
+        int m2 = 5;
+        
+        // Create grid
+        Grid grid = create_test_grid(m1, m2);
+        
+        // Create and build A0 matrix
+        heston_A0Storage_gpu A0(m1, m2);
+        double rho = -0.9;
+        double sigma = 0.3;
+        A0.build_matrix(grid, rho, sigma);
+        
+        // Get host copy using the getter method
+        auto values = A0.get_values();
+        auto values_host = Kokkos::create_mirror_view(values);
+        Kokkos::deep_copy(values_host, values);
+        
+        // Print matrix structure
+        std::cout << "A0 Matrix Structure:" << std::endl;
+        std::cout << "--------------------" << std::endl;
+        
+        for(int j = 0; j < m2-1; ++j) {
+            std::cout << "\nVariance level j=" << j << ":" << std::endl;
+            for(int i = 0; i < m1-1; ++i) {
+                std::cout << "Row " << i << ": ";
+                for(int val = 0; val < 9; ++val) {
+                    std::cout << values_host(j, i*9 + val) << " ";
+                }
+                std::cout << std::endl;
+            }
+        }
+        
+        // Print dimensions
+        std::cout << "\nDimensions:" << std::endl;
+        std::cout << "Values shape: [" << m2-1 << "][" << (m1-1)*9 << "]" << std::endl;
+        std::cout << "m1: " << A0.get_m1() << ", m2: " << A0.get_m2() << std::endl;
+    }
+}
+
+
+/*
+struct heston_A1Storage_gpu {
+    int m1, m2;
+    
+    Kokkos::View<double**> main_diags;
+    Kokkos::View<double**> lower_diags;
+    Kokkos::View<double**> upper_diags;
+
+    Kokkos::View<double**> implicit_main_diags;
+    Kokkos::View<double**> implicit_lower_diags;
+    Kokkos::View<double**> implicit_upper_diags;
+
+    heston_A1Storage_gpu(int m1_, int m2_) : m1(m1_), m2(m2_) {
+        main_diags = Kokkos::View<double**>("A1_main_diags", m2+1, m1+1);
+        lower_diags = Kokkos::View<double**>("A1_lower_diags", m2+1, m1);
+        upper_diags = Kokkos::View<double**>("A1_upper_diags", m2+1, m1);
+
+        implicit_main_diags = Kokkos::View<double**>("A1_impl_main_diags", m2+1, m1+1);
+        implicit_lower_diags = Kokkos::View<double**>("A1_impl_lower_diags", m2+1, m1);
+        implicit_upper_diags = Kokkos::View<double**>("A1_impl_upper_diags", m2+1, m1);
+    }
+
+    void build_matrix(const Grid& grid, double rho, double sigma, double r_d, double r_f) {
+        auto main_diags_host = Kokkos::create_mirror_view(main_diags);
+        auto lower_diags_host = Kokkos::create_mirror_view(lower_diags);
+        auto upper_diags_host = Kokkos::create_mirror_view(upper_diags);
+        
+        Kokkos::deep_copy(main_diags_host, 0.0);
+        Kokkos::deep_copy(lower_diags_host, 0.0);
+        Kokkos::deep_copy(upper_diags_host, 0.0);
+
+        // For j in range(m2 + 1)
+        for(int j = 0; j <= m2; j++) {
+            for(int i = 1; i < m1; i++) {
+                double a = 0.5 * grid.Vec_s[i] * grid.Vec_s[i] * grid.Vec_v[j];
+                double b = (r_d - r_f) * grid.Vec_s[i];
+                
+                // Populate diagonals using central difference coefficients
+                lower_diags_host(j, i-1) = a * delta_s(i-1, -1, grid.Delta_s) + 
+                                        b * beta_s(i-1, -1, grid.Delta_s);
+                main_diags_host(j, i) = a * delta_s(i-1, 0, grid.Delta_s) + 
+                                    b * beta_s(i-1, 0, grid.Delta_s) - 0.5 * r_d;
+                upper_diags_host(j, i) = a * delta_s(i-1, 1, grid.Delta_s) + 
+                                        b * beta_s(i-1, 1, grid.Delta_s);
+            }
+            // Add boundary term
+            main_diags_host(j, m1) = -0.5 * r_d;
+        }
+
+        Kokkos::deep_copy(main_diags, main_diags_host);
+        Kokkos::deep_copy(lower_diags, lower_diags_host);
+        Kokkos::deep_copy(upper_diags, upper_diags_host);
+    }
+
+    void build_implicit(const double theta, const double delta_t) {
+        const int local_m1 = m1;
+        const int local_m2 = m2;
+        const auto local_main = main_diags;
+        const auto local_lower = lower_diags;
+        const auto local_upper = upper_diags;
+        const auto local_impl_main = implicit_main_diags;
+        const auto local_impl_lower = implicit_lower_diags;
+        const auto local_impl_upper = implicit_upper_diags;
+
+        Kokkos::parallel_for("build_implicit", 1, KOKKOS_LAMBDA(const int) {
+            for(int j = 0; j <= local_m2; j++) {
+                for(int i = 0; i <= local_m1; i++) {
+                    local_impl_main(j,i) = 1.0 - theta * delta_t * local_main(j,i);
+                }
+                for(int i = 0; i < local_m1; i++) {
+                    local_impl_lower(j,i) = -theta * delta_t * local_lower(j,i);
+                    local_impl_upper(j,i) = -theta * delta_t * local_upper(j,i);
+                }
+            }
+        });
+        Kokkos::fence();
+    }
+
+    //explicit method single thread
+    void multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
+        const int local_m1 = m1;
+        const int local_m2 = m2;
+        const auto local_main = main_diags;
+        const auto local_lower = lower_diags;
+        const auto local_upper = upper_diags;
+
+        Kokkos::parallel_for("multiply", Kokkos::RangePolicy<>(0, 1), KOKKOS_LAMBDA(const int) {
+            for(int j = 0; j <= local_m2; j++) {
+                const int offset = j * (local_m1 + 1);
+                for(int i = 0; i <= local_m1; i++) {
+                    double sum = local_main(j,i) * x(offset + i);
+                    if(i > 0) {
+                        sum += local_lower(j,i-1) * x(offset + i-1);
+                    }
+                    if(i < local_m1) {
+                        sum += local_upper(j,i) * x(offset + i+1);
+                    }
+                    result(offset + i) = sum;
+                }
+            }
+        });
+        Kokkos::fence();
+    }
+    
+    //This is a sequential implicict solve. Only one thread is handling everything
+    void solve_implicit(Kokkos::View<double*>& x, const Kokkos::View<double*>& b) {
+        const int local_m1 = m1;
+        const int local_m2 = m2;
+        const auto local_impl_main = implicit_main_diags;
+        const auto local_impl_lower = implicit_lower_diags;
+        const auto local_impl_upper = implicit_upper_diags;
+        
+        Kokkos::View<double*> temp("temp", m1+1); //each block has dimesnion (m1+1)x(m1+1), A1_block x = d_block
+
+        Kokkos::parallel_for("solve_implicit", Kokkos::RangePolicy<>(0, 1), KOKKOS_LAMBDA(const int) {
+            for(int j = 0; j <= local_m2; j++) {
+                const int offset = j * (local_m1 + 1); //index for first entry of b for each block
+                
+                // Forward sweep
+
+                //first entry (0,0) of each block is 1 since A1 (0,0) is 0 (boundary condition at s=s_min=0 is 0)
+                //so I - thata*delta_t*A1 is 1
+                temp(0) = local_impl_main(j,0); //this is 1 for each j (see right above explanaiton)
+                x(offset) = b(offset);
+                
+                for(int i = 1; i <= local_m1; i++) {
+                    double m = local_impl_lower(j,i-1) / temp(i-1); // 
+                    temp(i) = local_impl_main(j,i) - m * local_impl_upper(j,i-1); // (wikipedia notation) b_2-a2*c_1', this is the new value of the diagonal
+                    x(offset + i) = b(offset + i) - m * x(offset + i-1); //updating solution with x_2 = x_2 - m * x_1
+                }
+
+                // Back substitution
+                x(offset + local_m1) /= temp(local_m1);
+                for(int i = local_m1-1; i >= 0; i--) {
+                    x(offset + i) = (x(offset + i) - 
+                        local_impl_upper(j,i) * x(offset + i+1)) / temp(i);
+                }
+            }
+        });
+        Kokkos::fence();
+    }
+    
+};
+
+void test_heston_A1() {
+    int m1 = 5;
+    int m2 = 5;
+    Grid grid = create_test_grid(m1, m2);
+    
+    heston_A1Storage_gpu A1(m1, m2);
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double r_f = 0.0;
+    
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    
+    auto main_host = Kokkos::create_mirror_view(A1.main_diags);
+    auto lower_host = Kokkos::create_mirror_view(A1.lower_diags);
+    auto upper_host = Kokkos::create_mirror_view(A1.upper_diags);
+    
+    Kokkos::deep_copy(main_host, A1.main_diags);
+    Kokkos::deep_copy(lower_host, A1.lower_diags);
+    Kokkos::deep_copy(upper_host, A1.upper_diags);
+    
+    std::cout << "A1 Matrix Structure:\n";
+    for(int j = 0; j <= m2; j++) {
+        std::cout << "\nVariance level j=" << j << ":\n";
+        std::cout << "Lower diagonal: ";
+        for(int i = 0; i < m1; i++) std::cout << lower_host(j,i) << " ";
+        std::cout << "\nMain diagonal:  ";
+        for(int i = 0; i <= m1; i++) std::cout << main_host(j,i) << " ";
+        std::cout << "\nUpper diagonal: ";
+        for(int i = 0; i < m1; i++) std::cout << upper_host(j,i) << " ";
+        std::cout << "\n";
+    }
+}
+*/
+//A1 class test
+void test_heston_A1() {
+    {   // Create scope for Kokkos objects
+        int m1 = 5;
+        int m2 = 5;
+        Grid grid = create_test_grid(m1, m2);
+        
+        heston_A1Storage_gpu A1(m1, m2);
+        double rho = -0.9;
+        double sigma = 0.3;
+        double r_d = 0.025;
+        double r_f = 0.0;
+        
+        A1.build_matrix(grid, rho, sigma, r_d, r_f);
+        
+        // Get Views using getters
+        auto main = A1.get_main_diags();
+        auto lower = A1.get_lower_diags();
+        auto upper = A1.get_upper_diags();
+
+        // Create mirror views (fixed typo in Kokkos::)
+        auto main_host = Kokkos::create_mirror_view(main);
+        auto lower_host = Kokkos::create_mirror_view(lower);
+        auto upper_host = Kokkos::create_mirror_view(upper);
+        
+        // Copy to host
+        Kokkos::deep_copy(main_host, main);
+        Kokkos::deep_copy(lower_host, lower);
+        Kokkos::deep_copy(upper_host, upper);
+        
+        // Print matrices
+        std::cout << "A1 Matrix Structure:\n";
+        std::cout << "--------------------\n";
+        
+        for(int j = 0; j <= m2; j++) {
+            std::cout << "\nVariance level j=" << j << ":\n";
+            std::cout << "Lower diagonal: ";
+            for(int i = 0; i < m1; i++) std::cout << lower_host(j,i) << " ";
+            std::cout << "\nMain diagonal:  ";
+            for(int i = 0; i <= m1; i++) std::cout << main_host(j,i) << " ";
+            std::cout << "\nUpper diagonal: ";
+            for(int i = 0; i < m1; i++) std::cout << upper_host(j,i) << " ";
+            std::cout << "\n";
+        }
+
+        // Print dimensions
+        std::cout << "\nDimensions:\n";
+        std::cout << "m1: " << A1.get_m1() << ", m2: " << A1.get_m2() << "\n";
+    }   // Scope ends here, Kokkos objects destroyed
+}
+
+
+/*
+struct heston_A2Storage_gpu {
+    int m1, m2;
+    
+    // Explicit system diagonals
+    Kokkos::View<double*> main_diag;     // (m2-1)*(m1+1)
+    Kokkos::View<double*> lower_diag;    // (m2-2)*(m1+1)
+    Kokkos::View<double*> upper_diag;    // (m2-1)*(m1+1)
+    Kokkos::View<double*> upper2_diag;   // m1+1
+
+    // Implicit system diagonals
+    Kokkos::View<double*> implicit_main_diag;   // (m2+1)*(m1+1)
+    Kokkos::View<double*> implicit_lower_diag;  // (m2-2)*(m1+1)
+    Kokkos::View<double*> implicit_upper_diag;  // (m2-1)*(m1+1)
+    Kokkos::View<double*> implicit_upper2_diag; // m1+1
+
+    heston_A2Storage_gpu(int m1_, int m2_) : m1(m1_), m2(m2_) {
+        main_diag = Kokkos::View<double*>("A2_main_diag", (m2-1)*(m1+1));
+        lower_diag = Kokkos::View<double*>("A2_lower_diag", (m2-2)*(m1+1));
+        upper_diag = Kokkos::View<double*>("A2_upper_diag", (m2-1)*(m1+1));
+        upper2_diag = Kokkos::View<double*>("A2_upper2_diag", m1+1);
+
+        implicit_main_diag = Kokkos::View<double*>("A2_impl_main_diag", (m2+1)*(m1+1));
+        implicit_lower_diag = Kokkos::View<double*>("A2_impl_lower_diag", (m2-2)*(m1+1));
+        implicit_upper_diag = Kokkos::View<double*>("A2_impl_upper_diag", (m2-1)*(m1+1));
+        implicit_upper2_diag = Kokkos::View<double*>("A2_impl_upper2_diag", m1+1);
+    }
+
+    void build_matrix(const Grid& grid, double rho, double sigma, double r_d, double kappa, double eta) {
+        auto h_main = Kokkos::create_mirror_view(main_diag);
+        auto h_lower = Kokkos::create_mirror_view(lower_diag);
+        auto h_upper = Kokkos::create_mirror_view(upper_diag);
+        auto h_upper2 = Kokkos::create_mirror_view(upper2_diag);
+        
+        Kokkos::deep_copy(h_main, 0.0);
+        Kokkos::deep_copy(h_lower, 0.0);
+        Kokkos::deep_copy(h_upper, 0.0);
+        Kokkos::deep_copy(h_upper2, 0.0);
+
+        int spacing = m1+1;
+
+        // Handle j=0 case first
+        for(int i = 0; i < m1+1; i++) {
+            double temp = kappa * (eta - grid.Vec_v[0]);
+            // Use l_9c = [0,1,2]
+            h_main(i) += temp * gamma_v(0, 0, grid.Delta_v);
+            h_upper(i) += temp * gamma_v(0, 1, grid.Delta_v);
+            h_upper2(i) = temp * gamma_v(0, 2, grid.Delta_v);
+        }
+
+        // Handle remaining j values
+        for(int j = 1; j < m2-1; j++) {
+            for(int i = 0; i < m1+1; i++) {
+                double temp = kappa * (eta - grid.Vec_v[j]);
+                double temp2 = 0.5 * sigma * sigma * grid.Vec_v[j];
+
+                if(grid.Vec_v[j] > 1.0) {
+                    int main_idx = i + (j+1)*(m1+1);
+                    // Using l_9a = [-2,-1,0]
+                    if(j > 0) h_lower[main_idx-spacing] += temp * alpha_v(j, -2, grid.Delta_v);
+                    h_lower[main_idx] += temp * alpha_v(j, -1, grid.Delta_v);
+                    h_main[main_idx] += temp * alpha_v(j, 0, grid.Delta_v);
+
+                    // Add regular central differences
+                    for(int k = -1; k <= 1; k++) {
+                        int idx = j > 0 ? main_idx + k*spacing : i + k*spacing;
+                        if(k == -1) h_lower[idx] += temp2 * delta_v(j-1, k, grid.Delta_v);
+                        else if(k == 0) h_main[main_idx] += temp2 * delta_v(j-1, k, grid.Delta_v);
+                        else h_upper[main_idx] += temp2 * delta_v(j-1, k, grid.Delta_v);
+                    }
+                } else {
+                    int main_idx = i + j*(m1+1);
+                    for(int k = -1; k <= 1; k++) {
+                        if(k == -1 && j > 0) h_lower[main_idx-spacing] += (temp * beta_v(j-1, k, grid.Delta_v) + 
+                                                                temp2 * delta_v(j-1, k, grid.Delta_v));
+                        else if(k == 0) h_main[main_idx] += (temp * beta_v(j-1, k, grid.Delta_v) + 
+                                                        temp2 * delta_v(j-1, k, grid.Delta_v));
+                        else h_upper[main_idx] += (temp * beta_v(j-1, k, grid.Delta_v) + 
+                                                temp2 * delta_v(j-1, k, grid.Delta_v));
+                    }
+                }
+                h_main[i + j*(m1+1)] += -0.5 * r_d;
+            }
+        }
+
+        Kokkos::deep_copy(main_diag, h_main);
+        Kokkos::deep_copy(lower_diag, h_lower);
+        Kokkos::deep_copy(upper_diag, h_upper);
+        Kokkos::deep_copy(upper2_diag, h_upper2);
+    }
+
+    void build_implicit(const double theta, const double delta_t) {
+        const int local_m1 = m1;
+        const int local_m2 = m2;
+
+        const auto local_main = main_diag;
+        const auto local_lower = lower_diag;
+        const auto local_upper = upper_diag;
+        const auto local_upper2 = upper2_diag;
+
+        const auto local_impl_main = implicit_main_diag;
+        const auto local_impl_lower = implicit_lower_diag;
+        const auto local_impl_upper = implicit_upper_diag;
+        const auto local_impl_upper2 = implicit_upper2_diag;
+
+        Kokkos::parallel_for("build_implicit", 1, KOKKOS_LAMBDA(const int) {
+            // Initialize implicit_main_diag with identity
+            for(int i = 0; i < (local_m2+1)*(local_m1+1); i++) {
+                local_impl_main(i) = 1.0;
+            }
+
+            // Subtract theta*delta_t*A2 from main diagonal where A2 is defined
+            for(int i = 0; i < (local_m2-1)*(local_m1+1); i++) {
+                local_impl_main(i) -= theta * delta_t * local_main(i);
+            }
+
+            // Build the off-diagonal terms
+            for(int i = 0; i < (local_m2-2)*(local_m1+1); i++) {
+                local_impl_lower(i) = -theta * delta_t * local_lower(i);
+            }
+
+            for(int i = 0; i < (local_m2-1)*(local_m1+1); i++) {
+                local_impl_upper(i) = -theta * delta_t * local_upper(i);
+            }
+
+            for(int i = 0; i < local_m1+1; i++) {
+                local_impl_upper2(i) = -theta * delta_t * local_upper2(i);
+            }
+        });
+        Kokkos::fence();
+    }
+
+    void multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
+        const int local_m1 = m1;
+        const int local_m2 = m2;
+
+        const auto local_main = main_diag;
+        const auto local_lower = lower_diag;
+        const auto local_upper = upper_diag;
+        const auto local_upper2 = upper2_diag;
+
+        const int spacing = m1 + 1;
+        
+        // First set result to zero
+        Kokkos::deep_copy(result, 0.0);
+        
+        Kokkos::parallel_for("multiply", 1, KOKKOS_LAMBDA(const int) {
+            // First block (j=0)
+            for(int i = 0; i < spacing; i++) {
+                double temp = local_main(i) * x(i);
+                temp += local_upper(i) * x(i + spacing);
+                temp += local_upper2(i) * x(i + 2*spacing);
+                result(i) = temp;
+            }
+
+            // Handle remaining blocks
+            for(int i = spacing; i < (local_m2-1)*(local_m1+1); i++) {
+                double temp = local_lower(i-spacing) * x(i-spacing);
+                temp += local_main(i) * x(i);
+                temp += local_upper(i) * x(i + spacing);
+                result(i) = temp;
+            }
+        });
+        Kokkos::fence();
+    }
+
+    void solve_implicit(Kokkos::View<double*>& x, const Kokkos::View<double*>& b) {
+        //const int local_m1 = m1;
+        const int local_m2 = m2;
+        const int spacing = m1 + 1;
+        const int num_rows = (local_m2-1)*spacing;
+        const int total_size = (local_m2+1)*spacing;
+
+        // Temporary storage on device
+        Kokkos::View<double*> c_star("c_star", num_rows);
+        Kokkos::View<double*> c2_star("c2_star", spacing);
+        Kokkos::View<double*> d_star("d_star", total_size);
+
+        const auto local_impl_main = implicit_main_diag;
+        const auto local_impl_lower = implicit_lower_diag;
+        const auto local_impl_upper = implicit_upper_diag;
+        const auto local_impl_upper2 = implicit_upper2_diag;
+
+        Kokkos::parallel_for("solve_implicit", 1, KOKKOS_LAMBDA(const int) {
+            // Identity block
+            for(int i = num_rows; i < total_size; i++) {
+                d_star(i) = b(i);
+            }
+
+            // Normalize first m1+1 rows and upper2_diagonal
+            for(int i = 0; i < spacing; i++) {
+                c_star(i) = local_impl_upper(i) / local_impl_main(i);
+                c2_star(i) = local_impl_upper2(i) / local_impl_main(i);
+                d_star(i) = b(i) / local_impl_main(i);
+            }
+
+            // First block forward sweep (handle upper2_diag)
+            for(int i = 0; i < spacing; i++) {
+                double c_upper = local_impl_upper(i+spacing) - c2_star(i)*local_impl_lower(i);
+                double m = 1.0 / (local_impl_main(i+spacing) - c_star(i)*local_impl_lower(i));
+                c_star(i+spacing) = c_upper * m;
+                d_star(i+spacing) = (b(i+spacing) - local_impl_lower(i) * d_star(i)) * m;
+            }
+
+            // Middle blocks forward sweep
+            for(int i = spacing; i < num_rows - spacing; i++) {
+                double m = 1.0 / (local_impl_main(i+spacing) - c_star(i)*local_impl_lower(i));
+                c_star(i+spacing) = local_impl_upper(i+spacing) * m;
+                d_star(i+spacing) = (b(i+spacing) - local_impl_lower(i) * d_star(i)) * m;
+            }
+
+            // Pre-backward sweep
+            for(int i = num_rows - spacing; i < num_rows; i++) {
+                d_star(i) -= d_star(i+spacing)*c_star(i);
+            }
+
+            // Last m1+1 rows
+            for(int i = num_rows - spacing; i < num_rows; i++) {
+                x(i) = d_star(i);
+            }
+
+            // Backward sweep until upper2_diag appears
+            for(int i = num_rows-1; i >= 3*spacing; i--) {
+                x(i-spacing) = d_star(i-spacing) - c_star(i-spacing) * x(i);
+            }
+
+            // First block back substitution with upper2_diag
+            for(int i = 3*spacing-1; i >= 2*spacing; i--) {
+                x(i-spacing) = d_star(i-spacing) - c_star(i-spacing) * x(i);
+                d_star(i-2*spacing) = d_star(i-2*spacing) - c2_star(i-2*spacing) * x(i);
+            }
+
+            // Last backward substitution
+            for(int i = 2*spacing-1; i >= spacing; i--) {
+                x(i-spacing) = d_star(i-spacing) - c_star(i-spacing) * x(i);
+            }
+
+            // Identity block
+            for(int i = num_rows; i < total_size; i++) {
+                x(i) = d_star(i);
+            }
+        });
+        Kokkos::fence();
+    }
+
+};
+
+void test_heston_A2() {
+    {
+        int m1 = 5;
+        int m2 = 5;
+        Grid grid = create_test_grid(m1, m2);
+
+        //test_grid();
+        
+        heston_A2Storage_gpu A2(m1, m2);
+        double rho = -0.9;
+        double sigma = 0.3;
+        double r_d = 0.025;
+        double kappa = 1.5;
+        double eta = 0.04;
+        std::cout << "here" << std::endl;
+        A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+        
+        // Get host copies
+        auto h_main = Kokkos::create_mirror_view(A2.main_diag);
+        auto h_lower = Kokkos::create_mirror_view(A2.lower_diag);
+        auto h_upper = Kokkos::create_mirror_view(A2.upper_diag);
+        auto h_upper2 = Kokkos::create_mirror_view(A2.upper2_diag);
+        
+        Kokkos::deep_copy(h_main, A2.main_diag);
+        Kokkos::deep_copy(h_lower, A2.lower_diag);
+        Kokkos::deep_copy(h_upper, A2.upper_diag);
+        Kokkos::deep_copy(h_upper2, A2.upper2_diag);
+
+        std::cout << "A2 Matrix Structure:\n";
+        std::cout << "First block (j=0) upper2 diagonal:\n";
+        for(int i = 0; i < m1+1; i++) 
+            std::cout << h_upper2[i] << " ";
+        std::cout << "\n\n";
+
+        for(int j = 0; j < m2-1; j++) {
+            std::cout << "Block j=" << j << ":\n";
+            if(j > 0) {
+                std::cout << "Lower diagonal: ";
+                for(int i = 0; i < m1+1; i++) 
+                    std::cout << h_lower[i + j*(m1+1)] << " ";
+                std::cout << "\n";
+            }
+            std::cout << "Main diagonal:  ";
+            for(int i = 0; i < m1+1; i++) 
+                std::cout << h_main[i + j*(m1+1)] << " ";
+            std::cout << "\nUpper diagonal: ";
+            for(int i = 0; i < m1+1; i++) 
+                std::cout << h_upper[i + j*(m1+1)] << " ";
+            std::cout << "\n\n";
+        }
+    }
+}
+*/
+//A2 class test
+/*
+void test_heston_A2() {
+    // Create scope for Kokkos objects
+    int m1 = 5;
+    int m2 = 5;
+    Grid grid = create_test_grid(m1, m2);
+    
+    // Create and build A2 matrix
+    heston_A2Storage_gpu A2(m1, m2);
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double kappa = 1.5;
+    double eta = 0.04;
+    
+    
+    A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    
+    // Get Views using getters
+    auto main = A2.get_main_diag();
+    auto lower = A2.get_lower_diag();
+    auto upper = A2.get_upper_diag();
+    auto upper2 = A2.get_upper2_diag();
+
+    // Create mirror views
+    auto h_main = Kokkos::create_mirror_view(main);
+    auto h_lower = Kokkos::create_mirror_view(lower);
+    auto h_upper = Kokkos::create_mirror_view(upper);
+    auto h_upper2 = Kokkos::create_mirror_view(upper2);
+    
+    // Copy to host
+    Kokkos::deep_copy(h_main, main);
+    Kokkos::deep_copy(h_lower, lower);
+    Kokkos::deep_copy(h_upper, upper);
+    Kokkos::deep_copy(h_upper2, upper2);
+    
+    // Print matrices
+    std::cout << "A2 Matrix Structure:\n";
+    std::cout << "--------------------\n";
+    
+    std::cout << "First block (j=0) upper2 diagonal:\n";
+    for(int i = 0; i < m1+1; i++) 
+        std::cout << h_upper2[i] << " ";
+    std::cout << "\n\n";
+
+    for(int j = 0; j < m2-1; j++) {
+        std::cout << "Block j=" << j << ":\n";
+        if(j > 0) {
+            std::cout << "Lower diagonal: ";
+            for(int i = 0; i < m1+1; i++) 
+                std::cout << h_lower[i + j*(m1+1)] << " ";
+            std::cout << "\n";
+        }
+        std::cout << "Main diagonal:  ";
+        for(int i = 0; i < m1+1; i++) 
+            std::cout << h_main[i + j*(m1+1)] << " ";
+        std::cout << "\nUpper diagonal: ";
+        for(int i = 0; i < m1+1; i++) 
+            std::cout << h_upper[i + j*(m1+1)] << " ";
+        std::cout << "\n\n";
+    }
+
+    // Print dimensions
+    std::cout << "\nDimensions:\n";
+    std::cout << "m1: " << A2.get_m1() << ", m2: " << A2.get_m2() << "\n";
+    std::cout << "Values shape (main/upper): [" << (m2-1)*(m1+1) << "]\n";
+    std::cout << "Values shape (lower): [" << (m2-2)*(m1+1) << "]\n";
+    std::cout << "Values shape (upper2): [" << m1+1 << "]\n";
+}
+*/
+
+
+/*
+
+Here come the numerical tests for the A_i matrix classes. This is largely just a copy of the tests 
+in the mat_fac file. We basically compare the residual between implicict and explicit steps
+
+*/
+
+void test_A0_multiply() {
+    using timer = std::chrono::high_resolution_clock;
+    
+    // Test dimensions
+    const int m1 = 300; 
+    const int m2 = 100;
+    std::cout << "Testing A0 multiply with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
+
+    // Create grid
+    Grid grid = create_test_grid(m1, m2);
+
+    // Initialize A0 matrix
+    heston_A0Storage_gpu A0(m1, m2);
+    double rho = -0.9;
+    double sigma = 0.3;
+    A0.build_matrix(grid, rho, sigma);
+    
+    // Total size
+    const int total_size = (m1 + 1) * (m2 + 1);
+
+    // Create test vectors
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> result("result", total_size);
+    
+    // Initialize x with values 1,2,3,...
+    Kokkos::parallel_for("init_x", total_size, KOKKOS_LAMBDA(const int idx) {
+        x(idx) = static_cast<double>(idx + 1);
+    });
+    
+    // Zero result vector
+    Kokkos::deep_copy(result, 0.0);
+
+    // Test multiply
+    std::cout << "\nTesting multiply...\n";
+    auto t_start = timer::now();
+    A0.multiply_seq(x, result);
+    auto t_end = timer::now();
+
+    std::cout << "Multiply time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+
+    // Copy results back and check
+    auto h_x = Kokkos::create_mirror_view(x);
+    auto h_result = Kokkos::create_mirror_view(result);
+    Kokkos::deep_copy(h_x, x);
+    Kokkos::deep_copy(h_result, result);
+
+    // Print first few results
+    std::cout << "\nFirst 10 results:\n";
+    for(int i = 0; i < std::min(10, total_size); i++) {
+        std::cout << "result[" << i << "] = " << h_result(i) << "\n";
+    }
+}
+
+void test_A1_multiply_and_implicit() {
+    using timer = std::chrono::high_resolution_clock;
+    
+    // Test dimensions
+    const int m1 = 3000;
+    const int m2 = 10000;
+    std::cout << "Testing A1 with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
+
+    // Create grid
+    Grid grid = create_test_grid(m1, m2);
+    
+    // Initialize A1
+    heston_A1Storage_gpu A1(m1, m2);
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double r_f = 0.0;
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+
+    // After building A1
+    auto h_main_check = Kokkos::create_mirror_view(A1.get_main_diags());
+    auto h_lower_check = Kokkos::create_mirror_view(A1.get_lower_diags());
+    auto h_upper_check = Kokkos::create_mirror_view(A1.get_upper_diags());
+
+    Kokkos::deep_copy(h_main_check, A1.get_main_diags());
+    Kokkos::deep_copy(h_lower_check, A1.get_lower_diags());
+    Kokkos::deep_copy(h_upper_check, A1.get_upper_diags());
+
+    const int total_size = (m1 + 1) * (m2 + 1);
+    
+    // Create test vectors
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> b("b", total_size);
+    Kokkos::View<double*> result("result", total_size);
+    Kokkos::deep_copy(result, 0.0);  // Initialize result to zero
+    
+    // Initialize with random values
+    auto h_b = Kokkos::create_mirror_view(b);
+    auto h_x = Kokkos::create_mirror_view(x);
+    for (int i = 0; i < total_size; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+        h_x(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(x, h_x);
+
+    // Build implicit matrix
+    double theta = 0.8;
+    double delta_t = 1.0/14;
+    A1.build_implicit(theta, delta_t);
+
+    
+    // Test multiply
+    auto t_start = timer::now();
+    A1.multiply(x, result);
+    auto t_end = timer::now();
+    
+    std::cout << "Multiply time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+
+    // Check multiply result
+    /*
+    auto h_result = Kokkos::create_mirror_view(result);
+    Kokkos::deep_copy(h_result, result);
+    std::cout << "After multiply, first few results: ";
+    for(int i = 0; i < total_size; i++) std::cout << h_result(i) << " ";
+    std::cout << "\n";
+    */
+
+
+    // Test implicit solve
+    t_start = timer::now();
+    A1.solve_implicit_parallel_v(x, b); //x values changed here
+    t_end = timer::now();
+    
+    std::cout << "Implicit solve time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+
+    // Verify solution
+    Kokkos::View<double*> verify("verify", total_size);
+    A1.multiply(x, verify);
+    
+    // Compute residual
+    auto h_verify = Kokkos::create_mirror_view(verify);
+    Kokkos::deep_copy(h_verify, verify);
+    
+    double residual = 0.0;
+    Kokkos::deep_copy(h_x, x);  // Make sure we have latest x values
+
+    std::cout << "\nDebug values for first block:\n";
+    for(int i = 0; i < m1+1; i++) {
+        double res = h_x(i) - theta * delta_t * h_verify(i) - h_b(i);
+        residual += res * res;
+    }
+    residual = std::sqrt(residual);
+    
+    std::cout << "Residual norm: " << residual << std::endl;
+}
+
+/*
+void test_A2_multiply_and_implicit() {
+    using timer = std::chrono::high_resolution_clock;
+
+    // Test dimensions
+    int m1 = 5;
+    int m2 = 5;
+    Grid grid = create_test_grid(m1, m2);
+
+    // Create and build A2 matrix
+    heston_A2Storage_gpu A2(m1, m2);
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    std::cout << "here";
+    
+    A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    std::cout<< "here";
+    const int total_size = (m1 + 1) * (m2 + 1);
+
+    // Create test vectors
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> b("b", total_size);
+    Kokkos::View<double*> result("result", total_size);
+
+    // Initialize with random values
+    auto h_b = Kokkos::create_mirror_view(b);
+    auto h_x = Kokkos::create_mirror_view(x);
+    for (int i = 0; i < total_size; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+        h_x(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(x, h_x);
+
+    // Build implicit matrix
+    double theta = 0.8;
+    double delta_t = 0.001;
+    A2.build_implicit(theta, delta_t);
+
+    // Test multiply
+    auto t_start = timer::now();
+    multiply(A2, x, result);
+    auto t_end = timer::now();
+
+    std::cout << "Multiply time: "
+                << std::chrono::duration<double>(t_end - t_start).count()
+                << " seconds" << std::endl;
+
+    // Test implicit solve
+    t_start = timer::now();
+    solve_implicit(A2, x, b);
+    t_end = timer::now();
+
+    std::cout << "Implicit solve time: "
+                << std::chrono::duration<double>(t_end - t_start).count()
+                << " seconds" << std::endl;
+
+    // Verify solution
+    Kokkos::View<double*> verify("verify", total_size);
+    multiply(A2, x, verify);
+
+    // Compute residual
+    auto h_verify = Kokkos::create_mirror_view(verify);
+    Kokkos::deep_copy(h_verify, verify);
+
+
+    double residual = 0.0;
+    for(int i = 0; i < total_size; i++) {
+        double res = h_x(i) - theta * delta_t * h_verify(i) - h_b(i);
+        residual += res * res;
+    }
+    residual = std::sqrt(residual);
+
+    std::cout << "Residual norm: " << residual << std::endl;
+}
+*/
+
+
+
+
+/*
+
+This is the coalesc A1 test
+
+*/
+
+// Basic structure test
+void test_heston_A1_coalesc() {
+    {   // Create scope for Kokkos objects
+        int m1 = 5;
+        int m2 = 5;
+        Grid grid = create_test_grid(m1, m2);
+        
+        heston_A1Storage_coalesc A1(m1, m2);
+        double rho = -0.9;
+        double sigma = 0.3;
+        double r_d = 0.025;
+        double r_f = 0.0;
+        
+        A1.build_matrix(grid, rho, sigma, r_d, r_f);
+        
+        // Get Views using getters
+        auto main = A1.get_main_diags();
+        auto lower = A1.get_lower_diags();
+        auto upper = A1.get_upper_diags();
+
+        // Create mirror views
+        auto main_host = Kokkos::create_mirror_view(main);
+        auto lower_host = Kokkos::create_mirror_view(lower);
+        auto upper_host = Kokkos::create_mirror_view(upper);
+        
+        // Copy to host
+        Kokkos::deep_copy(main_host, main);
+        Kokkos::deep_copy(lower_host, lower);
+        Kokkos::deep_copy(upper_host, upper);
+        
+        // Print matrices
+        std::cout << "A1 Matrix Structure:\n";
+        std::cout << "--------------------\n";
+        
+        for(int j = 0; j <= m2; j++) {
+            std::cout << "\nVariance level j=" << j << ":\n";
+            
+            std::cout << "Lower diagonal: ";
+            for(int i = 0; i < m1; i++) {
+                std::cout << lower_host(j*m1 + i) << " ";
+            }
+            
+            std::cout << "\nMain diagonal:  ";
+            for(int i = 0; i <= m1; i++) {
+                std::cout << main_host(j*(m1+1) + i) << " ";
+            }
+            
+            std::cout << "\nUpper diagonal: ";
+            for(int i = 0; i < m1; i++) {
+                std::cout << upper_host(j*m1 + i) << " ";
+            }
+            std::cout << "\n";
+        }
+
+        // Print dimensions
+        std::cout << "\nDimensions:\n";
+        std::cout << "m1: " << A1.get_m1() << ", m2: " << A1.get_m2() << "\n";
+    }
+}
+
+// Performance test
+void test_A1_multiply_and_implicit_coalesc() {
+    using timer = std::chrono::high_resolution_clock;
+    
+    const int m1 = 300;
+    const int m2 = 100;
+    std::cout << "Testing A1 with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
+
+    Grid grid = create_test_grid(m1, m2);
+    
+    // Initialize A1
+    heston_A1Storage_coalesc A1(m1, m2);
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double r_f = 0.0;
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+
+    // Check matrices after building
+    auto h_main_check = Kokkos::create_mirror_view(A1.get_main_diags());
+    auto h_lower_check = Kokkos::create_mirror_view(A1.get_lower_diags());
+    auto h_upper_check = Kokkos::create_mirror_view(A1.get_upper_diags());
+
+    Kokkos::deep_copy(h_main_check, A1.get_main_diags());
+    Kokkos::deep_copy(h_lower_check, A1.get_lower_diags());
+    Kokkos::deep_copy(h_upper_check, A1.get_upper_diags());
+
+    const int total_size = (m1 + 1) * (m2 + 1);
+    
+    // Create test vectors
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> b("b", total_size);
+    Kokkos::View<double*> result("result", total_size);
+    Kokkos::deep_copy(result, 0.0);
+    
+    // Initialize with random values
+    auto h_b = Kokkos::create_mirror_view(b);
+    auto h_x = Kokkos::create_mirror_view(x);
+    for (int i = 0; i < total_size; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+        h_x(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(x, h_x);
+
+    // Build implicit matrix
+    double theta = 0.8;
+    double delta_t = 1.0/14;
+    A1.build_implicit(theta, delta_t);
+
+    /*
+    // Test sequential multiply
+    auto t_start = timer::now();
+    A1.multiply_seq(x, result);
+    auto t_end = timer::now();
+    std::cout << "Sequential multiply time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+    
+    
+    // Test parallel multiply
+    t_start = timer::now();
+    A1.multiply_parallel(x, result);
+    auto t_end_parallel = timer::now();
+    std::cout << "Parallel multiply time: "
+              << std::chrono::duration<double>(t_end_parallel - t_start).count()
+              << " seconds" << std::endl;
+    */
+    // Test implicit solve
+    auto t_start = timer::now();
+    A1.solve_implicit_parallel_v(x, b);
+    auto t_end = timer::now();
+    std::cout << "Implicit solve time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+    /*
+    // Verify solution
+    Kokkos::View<double*> verify("verify", total_size);
+    A1.multiply_parallel(x, verify);
+    
+    // Compute residual for first block
+    auto h_verify = Kokkos::create_mirror_view(verify);
+    Kokkos::deep_copy(h_verify, verify);
+    Kokkos::deep_copy(h_x, x);
+
+    double residual = 0.0;
+    std::cout << "\nDebug values for first block:\n";
+    for(int i = 0; i < m1+1; i++) {
+        double res = h_x(i) - theta * delta_t * h_verify(i) - h_b(i);
+        residual += res * res;
+    }
+    residual = std::sqrt(residual);
+    
+    std::cout << "Residual norm: " << residual << std::endl;
+    */
+}
+
+/*
+
+This is the basic A1 test with just three diagonasl
+
+*/
+
+// Basic structure test and performance test for flat storage A1 implementation
+void test_heston_A1_flat() {
+    {   // Create scope for Kokkos objects
+        int m1 = 5;
+        int m2 = 5;
+        Grid grid = create_test_grid(m1, m2);
+        
+        heston_A1_flat A1(m1, m2);
+        double rho = -0.9;
+        double sigma = 0.3;
+        double r_d = 0.025;
+        double r_f = 0.0;
+        
+        A1.build_matrix(grid, rho, sigma, r_d, r_f);
+        
+        // Get Views and create host mirrors
+        auto main = A1.get_main_diag();
+        auto lower = A1.get_lower_diag();
+        auto upper = A1.get_upper_diag();
+
+        auto main_host = Kokkos::create_mirror_view(main);
+        auto lower_host = Kokkos::create_mirror_view(lower);
+        auto upper_host = Kokkos::create_mirror_view(upper);
+        
+        // Copy to host
+        Kokkos::deep_copy(main_host, main);
+        Kokkos::deep_copy(lower_host, lower);
+        Kokkos::deep_copy(upper_host, upper);
+        
+        // Print all diagonals
+        std::cout << "A1 Matrix Diagonals:\n";
+        std::cout << "-------------------\n\n";
+
+        const int block_size = m1 + 1;
+        
+        std::cout << "Lower diagonal values [" << lower_host.extent(0) << " entries]:\n";
+        for(int i = 0; i < lower_host.extent(0); i++) {
+            if(i > 0 && i % block_size == 0) std::cout << "| "; // Block boundary marker
+            std::cout << lower_host(i) << " ";
+            if((i + 1) % 5 == 0) std::cout << "\n";
+        }
+        std::cout << "\n\n";
+
+        std::cout << "Main diagonal values [" << main_host.extent(0) << " entries]:\n";
+        for(int i = 0; i < main_host.extent(0); i++) {
+            if(i > 0 && i % block_size == 0) std::cout << "| "; // Block boundary marker
+            std::cout <<  main_host(i) << " ";
+            if((i + 1) % 5 == 0) std::cout << "\n";
+        }
+        std::cout << "\n\n";
+
+        std::cout << "Upper diagonal values [" << upper_host.extent(0) << " entries]:\n";
+        for(int i = 0; i < upper_host.extent(0); i++) {
+            if(i > 0 && i % block_size == 0) std::cout << "| "; // Block boundary marker
+            std::cout <<  upper_host(i) << " ";
+            if((i + 1) % 5 == 0) std::cout << "\n";
+        }
+        std::cout << "\n\n";
+
+        // Print dimensions
+        std::cout << "\nDimensions:\n";
+        std::cout << "m1: " << A1.get_m1() << ", m2: " << A1.get_m2() << "\n";
+        std::cout << "Block size: " << block_size << "\n";
+        std::cout << "Total size: " << A1.get_total_size() << "\n";
+        std::cout << "Number of blocks: " << m2 + 1 << "\n";
+    }
+}
+
+void test_A1_flat_performance() {
+    using timer = std::chrono::high_resolution_clock;
+    
+    // Test with larger dimensions
+    const int m1 = 300;
+    const int m2 = 100;
+    std::cout << "Testing flat A1 with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
+
+    Grid grid = create_test_grid(m1, m2);
+    
+    // Initialize A1
+    heston_A1_flat A1(m1, m2);
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double r_f = 0.0;
+    
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+   
+    const int total_size = (m1 + 1) * (m2 + 1);
+    
+    // Create test vectors
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> b("b", total_size);
+    Kokkos::View<double*> result("result", total_size);
+    
+    // Initialize with random values
+    auto h_b = Kokkos::create_mirror_view(b);
+    auto h_x = Kokkos::create_mirror_view(x);
+    for (int i = 0; i < total_size; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+        h_x(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(x, h_x);
+
+    // Build implicit matrix
+    double theta = 1.0;
+    double delta_t = 1.0;
+    
+    
+    A1.build_implicit(theta, delta_t);
+    
+    // Test multiply
+    //auto t_start = timer::now();
+    A1.multiply(x, result);
+    //auto t_end = timer::now();
+    //std::cout << "Matrix multiply time: "
+              //<< std::chrono::duration<double>(t_end - t_start).count()
+              //<< " seconds\n";
+    
+    // Test implicit solve
+    for(int i = 0; i < 5; i++) {
+        A1.solve_implicit(x, b);
+    }
+    
+    
+    // Verify solution
+    Kokkos::View<double*> verify("verify", total_size);
+    A1.multiply(x, verify);
+    
+    auto h_verify = Kokkos::create_mirror_view(verify);
+    Kokkos::deep_copy(h_verify, verify);
+    Kokkos::deep_copy(h_x, x);
+
+    // Compute residual
+    double residual = 0.0;
+    for(int i = 0; i < total_size; i++) {
+        double res = h_x(i) - theta * delta_t * h_verify(i) - h_b(i);
+        residual += res * res;
+    }
+    residual = std::sqrt(residual);
+    
+    std::cout << "Total residual norm: " << residual << "\n";
+}
+
+
+//THIS IS THE MOST IMPORTANT TEST
+//it shows that when we create a class to handle the solver steps we get an overhead increase
+//in perfomance of 1000x when compared to a standlaone implemnntation
+class SimpleTridiagonalSolver {
+private:
+    int N;
+    Kokkos::View<double*> diag;
+    Kokkos::View<double*> lower;
+    Kokkos::View<double*> upper;
+    Kokkos::View<double*> x;
+    Kokkos::View<double*> b;
+    Kokkos::View<double*> temp;
+    Kokkos::View<double*> b_copy;
+
+public:
+    SimpleTridiagonalSolver(int N_in) : N(N_in) {
+        diag = Kokkos::View<double*>("diag", N);
+        lower = Kokkos::View<double*>("lower_diag", N-1);
+        upper = Kokkos::View<double*>("upper_diag", N-1);
+        x = Kokkos::View<double*>("solution", N);
+        b = Kokkos::View<double*>("rhs", N);
+        temp = Kokkos::View<double*>("temp", N);
+        b_copy = Kokkos::View<double*>("b_copy", N);
+
+        // Initialize diagonals on the GPU
+        // Create host mirrors for diag, lower, and upper
+        auto h_diag = Kokkos::create_mirror_view(diag);
+        auto h_lower = Kokkos::create_mirror_view(lower);
+        auto h_upper = Kokkos::create_mirror_view(upper);
+
+        // Initialize on host
+        for (int i = 0; i < N; ++i) {
+            h_diag(i) = 2.0;
+        }
+        for (int i = 0; i < N - 1; ++i) {
+            h_lower(i) = -1.0;
+            h_upper(i) = -1.0;
+        }
+
+        // Copy back to device
+        Kokkos::deep_copy(diag, h_diag);
+        Kokkos::deep_copy(lower, h_lower);
+        Kokkos::deep_copy(upper, h_upper);
+
+        // Initialize b on host and copy to device
+        auto h_b = Kokkos::create_mirror_view(b);
+        for (int i = 0; i < N; ++i) {
+            h_b(i) = std::rand() / (RAND_MAX + 1.0);
+        }
+        Kokkos::deep_copy(b, h_b);
+
+        Kokkos::deep_copy(x, 0.0);
+        Kokkos::deep_copy(b_copy, b);
+    }
+
+    void solve_multiple_runs(int runs) {
+        using timer = std::chrono::high_resolution_clock;
+
+        // Copy member variables into local variables for use in the lambda
+        const int local_N = N;
+        auto local_diag = diag;
+        auto local_lower = lower;
+        auto local_upper = upper;
+        auto local_x = x;
+        auto local_b = b;
+        auto local_temp = temp;
+
+        for (int i = 0; i < runs; i++) {
+            auto t_start = timer::now();
+
+            Kokkos::parallel_for("tridiagonal_solve",
+                Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0,1),
+                KOKKOS_LAMBDA(const int) {
+                    // Forward sweep
+                    local_temp(0) = local_diag(0);
+                    local_x(0) = local_b(0);
+                    for (int j = 1; j < local_N; ++j) {
+                        double w = local_lower(j-1) / local_temp(j-1);
+                        local_temp(j) = local_diag(j) - w * local_upper(j-1);
+                        local_x(j) = local_b(j) - w * local_x(j-1);
+                    }
+
+                    // Backward substitution
+                    local_x(local_N - 1) = local_x(local_N - 1) / local_temp(local_N - 1);
+                    for (int j = local_N - 2; j >= 0; --j) {
+                        local_x(j) = (local_x(j) - local_upper(j) * local_x(j+1)) / local_temp(j);
+                    }
+                }
+            );
+            Kokkos::fence();
+
+            auto t_end = timer::now();
+            std::cout << "Run " << i << " solve time: "
+                      << std::chrono::duration<double>(t_end - t_start).count()
+                      << " seconds\n";
+        }
+    }
+
+    void check_residual() {
+        const int local_N = N;
+        auto local_diag = diag;
+        auto local_lower = lower;
+        auto local_upper = upper;
+        auto local_x = x;
+        auto local_b_copy = b_copy;
+
+        double residual = 0.0;
+        Kokkos::parallel_reduce("residual", local_N, KOKKOS_LAMBDA(const int i, double& update) {
+            double r_i = local_b_copy(i) - (local_diag(i) * local_x(i) +
+                                      (i > 0 ? local_lower(i-1) * local_x(i-1) : 0.0) +
+                                      (i < local_N-1 ? local_upper(i) * local_x(i+1) : 0.0));
+            update += r_i * r_i;
+        }, residual);
+
+        std::cout << "Residual norm: " << std::sqrt(residual) << std::endl;
+    }
+};
+
+void test_clas_tridi(){
+    
+        const int N = 30000;
+        std::cout << "D simsize: " << N << std::endl;
+
+        SimpleTridiagonalSolver solver(N);
+        solver.solve_multiple_runs(5);
+        solver.check_residual();
+}
+
+//same test ofr  a struct. Still bad perfomance
+struct TridiagonalMatrix {
+    Kokkos::View<double*> diag;    // Main diagonal
+    Kokkos::View<double*> lower;   // Lower diagonal
+    Kokkos::View<double*> upper;   // Upper diagonal
+    
+    TridiagonalMatrix(int N){
+        diag = Kokkos::View<double*>("diag", N);
+        lower = Kokkos::View<double*>("lower_diag", N-1);
+        upper = Kokkos::View<double*>("upper_diag", N-1);
+        // Create host mirrors for diag, lower, and upper
+        auto h_diag = Kokkos::create_mirror_view(diag);
+        auto h_lower = Kokkos::create_mirror_view(lower);
+        auto h_upper = Kokkos::create_mirror_view(upper);
+
+        // Initialize on host
+        for (int i = 0; i < N; ++i) {
+            h_diag(i) = 2.0;
+        }
+        for (int i = 0; i < N - 1; ++i) {
+            h_lower(i) = -1.0;
+            h_upper(i) = -1.0;
+        }
+
+        // Copy back to device
+        Kokkos::deep_copy(diag, h_diag);
+        Kokkos::deep_copy(lower, h_lower);
+        Kokkos::deep_copy(upper, h_upper);
+    }
+    
+};
+
+void solve_tridiagonal_struct(int N, int runs) {
+    using timer = std::chrono::high_resolution_clock;
+    
+    // Create matrix structure
+    TridiagonalMatrix mat(N);
+    
+    // Create solution vectors
+    Kokkos::View<double*> x("x", N);
+    Kokkos::View<double*> b("b", N);
+    Kokkos::View<double*> temp("temp", N);
+    
+    // Initialize RHS with random values
+    auto h_b = Kokkos::create_mirror_view(b);
+    for (int i = 0; i < N; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+    
+    // Keep copy for residual check
+    Kokkos::View<double*> b_copy("b_copy", N);
+    Kokkos::deep_copy(b_copy, b);
+    Kokkos::deep_copy(x, 0.0);
+    
+    // Get local references to avoid member access overhead
+    auto diag = mat.diag;
+    auto lower = mat.lower;
+    auto upper = mat.upper;
+    
+    for (int i = 0; i < runs; i++) {
+        auto t_start = timer::now();
+        
+        Kokkos::parallel_for("tridiagonal_solve", 
+            Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0,1),
+            KOKKOS_LAMBDA(const int) {
+                // Forward sweep
+                temp(0) = diag(0);
+                x(0) = b(0);
+                for(int j = 1; j < N; ++j) {
+                    double w = lower(j-1) / temp(j-1);
+                    temp(j) = diag(j) - w * upper(j-1);
+                    x(j) = b(j) - w * x(j-1);
+                }
+                
+                // Backward substitution
+                x(N-1) = x(N-1) / temp(N-1);
+                for(int j = N-2; j >= 0; --j) {
+                    x(j) = (x(j) - upper(j) * x(j+1)) / temp(j);
+                }
+            }
+        );
+        Kokkos::fence();
+        
+        auto t_end = timer::now();
+        std::cout << "Run " << i << " solve time: "
+                  << std::chrono::duration<double>(t_end - t_start).count()
+                  << " seconds\n";
+    }
+    
+    // Verify solution
+    double residual = 0.0;
+    Kokkos::parallel_reduce("residual", N, KOKKOS_LAMBDA(const int i, double& update) {
+        double r_i = b_copy(i) - (diag(i) * x(i) + 
+                              (i > 0 ? lower(i-1) * x(i-1) : 0.0) +
+                              (i < N-1 ? upper(i) * x(i+1) : 0.0));
+        update += r_i * r_i;
+    }, residual);
+    
+    std::cout << "Residual norm: " << std::sqrt(residual) << std::endl;
+}
+
+void solve_tridiagonal_flat(
+    const Kokkos::View<double*> diag,
+    const Kokkos::View<double*> lower,
+    const Kokkos::View<double*> upper,
+    Kokkos::View<double*> x,
+    const Kokkos::View<double*> b,
+    Kokkos::View<double*> temp,
+    int N) 
+{
+    using timer = std::chrono::high_resolution_clock;
+    for (int i = 0; i < 5; i++) {
+        auto t_start = timer::now();
+        
+        Kokkos::parallel_for("tridiagonal_solve", 
+            Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0,1),
+            KOKKOS_LAMBDA(const int) {
+                // Forward sweep
+                temp(0) = diag(0);
+                x(0) = b(0);
+                for(int j = 1; j < N; ++j) {
+                    double w = lower(j-1) / temp(j-1);
+                    temp(j) = diag(j) - w * upper(j-1);
+                    x(j) = b(j) - w * x(j-1);
+                }
+                
+                // Backward substitution
+                x(N-1) = x(N-1) / temp(N-1);
+                for(int j = N-2; j >= 0; --j) {
+                    x(j) = (x(j) - upper(j) * x(j+1)) / temp(j);
+                }
+            }
+        );
+        Kokkos::fence();
+        
+        auto t_end = timer::now();
+        std::cout << "Run " << i << " solve time: "
+                  << std::chrono::duration<double>(t_end - t_start).count()
+                  << " seconds\n";
+    }
+    
+    // Verify solution
+    // Keep copy for residual check
+    Kokkos::View<double*> b_copy("b_copy", N);
+    Kokkos::deep_copy(b_copy, b);
+    double residual = 0.0;
+    Kokkos::parallel_reduce("residual", N, KOKKOS_LAMBDA(const int i, double& update) {
+        double r_i = b_copy(i) - (diag(i) * x(i) + 
+                              (i > 0 ? lower(i-1) * x(i-1) : 0.0) +
+                              (i < N-1 ? upper(i) * x(i+1) : 0.0));
+        update += r_i * r_i;
+    }, residual);
+    
+    std::cout << "Residual norm: " << std::sqrt(residual) << std::endl;
+}
+
+void test_struct_tridi() {
+    const int N = 30000;
+    std::cout << "Testing struct implementation with N = " << N << std::endl;
+    solve_tridiagonal_struct(N, 5);
+}
+
+void test_free_struct_tridi() {
+    const int N = 30000;
+    // Create matrix structure
+    TridiagonalMatrix mat(N);
+    
+    // Create solution vectors
+    Kokkos::View<double*> x("x", N);
+    Kokkos::View<double*> b("b", N);
+    Kokkos::View<double*> temp("temp", N);
+    
+    // Initialize RHS with random values
+    auto h_b = Kokkos::create_mirror_view(b);
+    for (int i = 0; i < N; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+
+    std::cout << "Testing struct implementation with N = " << N << std::endl;
+    solve_tridiagonal_flat(
+    mat.diag,
+    mat.lower,
+    mat.upper,
+    x,
+    b,
+    temp,
+    N); 
+}
+
+void solve_tridiagonal_completely_flat() {
+    int N = 30000;
+    using timer = std::chrono::high_resolution_clock;
+    
+    // Create all Views directly
+    Kokkos::View<double*> diag("diag", N);
+    Kokkos::View<double*> lower("lower", N-1);
+    Kokkos::View<double*> upper("upper", N-1);
+    Kokkos::View<double*> x("x", N);
+    Kokkos::View<double*> b("b", N);
+    Kokkos::View<double*> temp("temp", N);
+
+    // Initialize directly on device
+    Kokkos::parallel_for("init_diags", N, KOKKOS_LAMBDA(const int i) {
+        diag(i) = 2.0;
+        if(i < N-1) {
+            lower(i) = -1.0;
+            upper(i) = -1.0;
+        }
+    });
+
+    // Initialize RHS
+    auto h_b = Kokkos::create_mirror_view(b);
+    for (int i = 0; i < N; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(x, 0.0);
+
+    // Solver loop
+    for (int i = 0; i < 5; i++) {
+        auto t_start = timer::now();
+        
+        Kokkos::parallel_for("tridiagonal_solve", 
+            Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0,1),
+            KOKKOS_LAMBDA(const int) {
+                // Forward sweep
+                temp(0) = diag(0);
+                x(0) = b(0);
+                for(int j = 1; j < N; ++j) {
+                    double w = lower(j-1) / temp(j-1);
+                    temp(j) = diag(j) - w * upper(j-1);
+                    x(j) = b(j) - w * x(j-1);
+                }
+                
+                // Backward substitution
+                x(N-1) = x(N-1) / temp(N-1);
+                for(int j = N-2; j >= 0; --j) {
+                    x(j) = (x(j) - upper(j) * x(j+1)) / temp(j);
+                }
+            }
+        );
+        Kokkos::fence();
+        
+        auto t_end = timer::now();
+        std::cout << "Run " << i << " solve time: "
+                  << std::chrono::duration<double>(t_end - t_start).count()
+                  << " seconds\n";
+    }
+
+    // Verify solution
+    Kokkos::View<double*> b_copy("b_copy", N);
+    Kokkos::deep_copy(b_copy, b);
+    double residual = 0.0;
+    Kokkos::parallel_reduce("residual", N, KOKKOS_LAMBDA(const int i, double& update) {
+        double r_i = b_copy(i) - (diag(i) * x(i) + 
+                              (i > 0 ? lower(i-1) * x(i-1) : 0.0) +
+                              (i < N-1 ? upper(i) * x(i+1) : 0.0));
+        update += r_i * r_i;
+    }, residual);
+    
+    std::cout << "Residual norm: " << std::sqrt(residual) << std::endl;
+}
+
+void test_tridiagonal_matrixfree2() {
+    using timer = std::chrono::high_resolution_clock;
+
+    // Problem size
+    const int N = 300;
+    std::cout<< "D simsize: " << N << std::endl;
+    
+    // Create vectors for diagonal structure instead of full matrix
+    Kokkos::View<double*> diag("diagonal", N);        // Main diagonal (2.0)
+    Kokkos::View<double*> lower("lower_diag", N-1);   // Lower diagonal (-1.0)
+    Kokkos::View<double*> upper("upper_diag", N-1);   // Upper diagonal (-1.0)
+    Kokkos::View<double*> x("solution", N);
+    Kokkos::View<double*> b("rhs", N);
+    Kokkos::View<double*> temp("temp", N);
+    
+    // Initialize diagonals
+    Kokkos::parallel_for("init_diags", N, KOKKOS_LAMBDA(const int i) {
+        diag(i) = 2;
+        if(i < N-1) {
+            lower(i) = -1;
+            upper(i) = -1;
+        }
+    });
+
+    // Initialize with random values
+    auto h_b = Kokkos::create_mirror_view(b);
+    for (int i = 0; i < N; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+
+    Kokkos::deep_copy(x, 0.0);
+
+    // Copy b to b_copy for residual calculation later
+    Kokkos::View<double*> b_copy("b_copy", N);
+    Kokkos::deep_copy(b_copy, b);
+
+    // In test_tridiagonal_matrixfree:
+    for(int i = 0; i < 5; i++) {
+        auto t_start = timer::now();
+        // Sequential Thomas algorithm on device
+        Kokkos::parallel_for("tridiagonal_solve", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0,1), KOKKOS_LAMBDA(const int) {
+            // Forward sweep
+            temp(0) = diag(0);
+            x(0) = b(0);
+            for(int i = 1; i < N; ++i) {
+                double w = lower(i-1) / temp(i-1);
+                temp(i) = diag(i) - w * upper(i-1);
+                x(i) = b(i) - w * x(i-1);
+            }
+
+            // Backward substitution
+            x(N-1) = x(N-1) / temp(N-1);
+            for(int i = N-2; i >= 0; --i) {
+                x(i) = (x(i) - upper(i) * x(i+1)) / temp(i);
+            }
+        });
+        Kokkos::fence();
+        auto t_end = timer::now();
+        std::cout << "Run " << i << " solve time: "
+                << std::chrono::duration<double>(t_end - t_start).count()
+                << " seconds\n";
+    }
+
+    // Verify solution by computing residual matrix-free
+    double residual = 0.0;
+    Kokkos::parallel_reduce("residual", N, KOKKOS_LAMBDA(const int i, double& update) {
+        double r_i = b_copy(i) - (diag(i) * x(i) + 
+                              (i > 0 ? lower(i-1) * x(i-1) : 0.0) +
+                              (i < N-1 ? upper(i) * x(i+1) : 0.0));
+        update += r_i * r_i;
+    }, residual);
+
+    std::cout << "Residual norm: " << std::sqrt(residual) << std::endl;
+}
+
+
+// Function to fill diagonals - separate from main solver
+void fill_diagonals(Kokkos::View<double*> diag, 
+                   Kokkos::View<double*> lower,
+                   Kokkos::View<double*> upper,
+                   const int N) {
+    // Initialize diagonals on gpu 
+    /*
+    Kokkos::parallel_for("init_diags", N, KOKKOS_LAMBDA(const int i) {
+        diag(i) = 2;
+        if(i < N-1) {
+            lower(i) = -1;
+            upper(i) = -1;
+        }
+    });
+    */
+
+    //Inits diagonals on host and copies them over
+    auto h_diag = Kokkos::create_mirror_view(diag);
+    auto h_lower = Kokkos::create_mirror_view(lower);
+    auto h_upper = Kokkos::create_mirror_view(upper);
+
+    // Initialize on host
+    for (int i = 0; i < N; ++i) {
+        h_diag(i) = 2.0;
+    }
+    for (int i = 0; i < N - 1; ++i) {
+        h_lower(i) = -1.0;
+        h_upper(i) = -1.0;
+    }
+
+    // Copy back to device
+    Kokkos::deep_copy(diag, h_diag);
+    Kokkos::deep_copy(lower, h_lower);
+    Kokkos::deep_copy(upper, h_upper);
+}
+
+void test_tridiagonal_matrixfree_with_init() {
+    using timer = std::chrono::high_resolution_clock;
+
+    // Problem size
+    const int N = 30000;
+    std::cout << "D simsize: " << N << std::endl;
+    
+    // Create all Views directly in function scope
+    Kokkos::View<double*> diag("diagonal", N);
+    Kokkos::View<double*> lower("lower_diag", N-1);
+    Kokkos::View<double*> upper("upper_diag", N-1);
+    Kokkos::View<double*> x("solution", N);
+    Kokkos::View<double*> b("rhs", N);
+    Kokkos::View<double*> temp("temp", N);
+    
+    // Call separate initialization function
+    fill_diagonals(diag, lower, upper, N);
+
+    // Initialize RHS with random values (as before)
+    auto h_b = Kokkos::create_mirror_view(b);
+    for (int i = 0; i < N; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(x, 0.0);
+
+    // Copy b for residual check
+    Kokkos::View<double*> b_copy("b_copy", N);
+    Kokkos::deep_copy(b_copy, b);
+
+    // Time the solver
+    for(int i = 0; i < 5; i++) {
+        auto t_start = timer::now();
+        
+        Kokkos::parallel_for("tridiagonal_solve", 
+            Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0,1),
+            KOKKOS_LAMBDA(const int) {
+                // Forward sweep
+                temp(0) = diag(0);
+                x(0) = b(0);
+                for(int j = 1; j < N; ++j) {
+                    double w = lower(j-1) / temp(j-1);
+                    temp(j) = diag(j) - w * upper(j-1);
+                    x(j) = b(j) - w * x(j-1);
+                }
+
+                // Backward substitution
+                x(N-1) = x(N-1) / temp(N-1);
+                for(int j = N-2; j >= 0; --j) {
+                    x(j) = (x(j) - upper(j) * x(j+1)) / temp(j);
+                }
+        });
+        
+        auto t_end = timer::now();
+        std::cout << "Run " << i << " solve time: "
+                << std::chrono::duration<double>(t_end - t_start).count()
+                << " seconds\n";
+    }
+
+    // Verify solution
+    double residual = 0.0;
+    Kokkos::parallel_reduce("residual", N, KOKKOS_LAMBDA(const int i, double& update) {
+        double r_i = b_copy(i) - (diag(i) * x(i) + 
+                              (i > 0 ? lower(i-1) * x(i-1) : 0.0) +
+                              (i < N-1 ? upper(i) * x(i+1) : 0.0));
+        update += r_i * r_i;
+    }, residual);
+
+    std::cout << "Residual norm: " << std::sqrt(residual) << std::endl;
+}
+
+
+/*
+
+the below was just some perfomance debugging test to see whgy the coalesc memory accessing
+was not givbing me improvements in time
+
+*/
+
+void compare_tridiagonal_implementations() {
+    using timer = std::chrono::high_resolution_clock;
+
+    // Case 1: Single large tridiagonal
+    const int N = 30000;
+    {
+        Kokkos::View<double*> diag("diagonal", N);
+        Kokkos::View<double*> lower("lower_diag", N-1);
+        Kokkos::View<double*> upper("upper_diag", N-1);
+        Kokkos::View<double*> x("solution", N);
+        Kokkos::View<double*> b("rhs", N);
+        Kokkos::View<double*> temp("temp", N);
+        
+        // Initialize
+        Kokkos::deep_copy(diag, 2.0);
+        Kokkos::deep_copy(lower, -1.0);
+        Kokkos::deep_copy(upper, -1.0);
+        Kokkos::deep_copy(b, 1.0);
+
+        auto t_start = timer::now();
+        
+        // Original fast version
+        Kokkos::parallel_for("single_large", 1, KOKKOS_LAMBDA(const int) {
+            temp(0) = diag(0);
+            x(0) = b(0);
+            for(int i = 1; i < N; ++i) {
+                double w = lower(i-1) / temp(i-1);
+                temp(i) = diag(i) - w * upper(i-1);
+                x(i) = b(i) - w * x(i-1);
+            }
+            x(N-1) = x(N-1) / temp(N-1);
+            for(int i = N-2; i >= 0; --i) {
+                x(i) = (x(i) - upper(i) * x(i+1)) / temp(i);
+            }
+        });
+        
+        auto t_end = timer::now();
+        std::cout << "Single large system time: " 
+                  << std::chrono::duration<double>(t_end - t_start).count() 
+                  << " seconds\n";
+    }
+
+    // Case 2: Same size but with block indexing
+    {
+        const int m1 = 300;
+        const int m2 = 100;
+        const int total_size = (m1 + 1) * (m2 + 1);
+        
+        Kokkos::View<double*> diag("diagonal", total_size);
+        Kokkos::View<double*> lower("lower_diag", total_size-1);
+        Kokkos::View<double*> upper("upper_diag", total_size-1);
+        Kokkos::View<double*> x("solution", total_size);
+        Kokkos::View<double*> b("rhs", total_size);
+        Kokkos::View<double*> temp("temp", total_size);
+
+        // Initialize
+        Kokkos::deep_copy(diag, 2.0);
+        Kokkos::deep_copy(lower, -1.0);
+        Kokkos::deep_copy(upper, -1.0);
+        Kokkos::deep_copy(b, 1.0);
+
+        auto t_start = timer::now();
+        
+        // Version with block indexing
+        Kokkos::parallel_for("block_indexed", 1, KOKKOS_LAMBDA(const int) {
+            for(int j = 0; j <= m2; j++) {
+                const int block_start = j * (m1 + 1);
+                
+                temp(block_start) = diag(block_start);
+                x(block_start) = b(block_start);
+                
+                for(int i = 1; i <= m1; i++) {
+                    const int curr_idx = block_start + i;
+                    double w = lower(curr_idx-1) / temp(curr_idx-1);
+                    temp(curr_idx) = diag(curr_idx) - w * upper(curr_idx-1);
+                    x(curr_idx) = b(curr_idx) - w * x(curr_idx-1);
+                }
+                
+                const int block_end = block_start + m1;
+                x(block_end) = x(block_end) / temp(block_end);
+                for(int i = m1-1; i >= 0; i--) {
+                    const int curr_idx = block_start + i;
+                    x(curr_idx) = (x(curr_idx) - upper(curr_idx) * x(curr_idx+1)) / temp(curr_idx);
+                }
+            }
+        });
+
+        auto t_end = timer::now();
+        std::cout << "Block indexed system time: " 
+                  << std::chrono::duration<double>(t_end - t_start).count() 
+                  << " seconds\n";
+    }
+
+    // Case 3: Same operation but with your current storage layout
+    {
+        const int m1 = 300;
+        const int m2 = 100;
+        
+        Kokkos::View<double*> main_diags("main_diags", (m2+1)*(m1+1));
+        Kokkos::View<double*> lower_diags("lower_diags", (m2+1)*m1);
+        Kokkos::View<double*> upper_diags("upper_diags", (m2+1)*m1);
+        Kokkos::View<double*> x("solution", (m2+1)*(m1+1));
+        Kokkos::View<double*> b("rhs", (m2+1)*(m1+1));
+        Kokkos::View<double*> temp("temp", (m2+1)*(m1+1));
+
+        // Initialize
+        Kokkos::deep_copy(main_diags, 2.0);
+        Kokkos::deep_copy(lower_diags, -1.0);
+        Kokkos::deep_copy(upper_diags, -1.0);
+        Kokkos::deep_copy(b, 1.0);
+
+        auto t_start = timer::now();
+        
+        // Version with separate diagonal arrays
+        Kokkos::parallel_for("separate_diags", 1, KOKKOS_LAMBDA(const int) {
+            for(int j = 0; j <= m2; j++) {
+                const int block_start = j * (m1 + 1);
+                const int off_start = j * m1;
+                
+                temp(block_start) = main_diags(block_start);
+                x(block_start) = b(block_start);
+                
+                for(int i = 1; i <= m1; i++) {
+                    const int curr_idx = block_start + i;
+                    const int off_idx = off_start + (i-1);
+                    double w = lower_diags(off_idx) / temp(curr_idx-1);
+                    temp(curr_idx) = main_diags(curr_idx) - w * upper_diags(off_idx);
+                    x(curr_idx) = b(curr_idx) - w * x(curr_idx-1);
+                }
+                
+                x(block_start + m1) /= temp(block_start + m1);
+                for(int i = m1-1; i >= 0; i--) {
+                    const int curr_idx = block_start + i;
+                    const int off_idx = off_start + i;
+                    x(curr_idx) = (x(curr_idx) - upper_diags(off_idx) * x(curr_idx+1)) 
+                                 / temp(curr_idx);
+                }
+            }
+        });
+
+        auto t_end = timer::now();
+        std::cout << "Separate diagonals time: " 
+                  << std::chrono::duration<double>(t_end - t_start).count() 
+                  << " seconds\n";
+    }
+}
+
+void test_parallel_tridiagonal() {
+    using timer = std::chrono::high_resolution_clock;
+    
+    const int m1 = 300;  // size of each system
+    const int m2 = 100;  // number of systems
+    
+    // Create arrays for all systems
+    Kokkos::View<double*> diag("diag", (m2+1)*(m1+1));
+    Kokkos::View<double*> lower("lower", (m2+1)*m1);
+    Kokkos::View<double*> upper("upper", (m2+1)*m1);
+    Kokkos::View<double*> x("x", (m2+1)*(m1+1));
+    Kokkos::View<double*> b("b", (m2+1)*(m1+1));
+    Kokkos::View<double*> temp("temp", (m2+1)*(m1+1));
+    
+    // Initialize (similar to before)
+    auto h_b = Kokkos::create_mirror_view(b);
+    for(int i = 0; i < (m2+1)*(m1+1); ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(diag, 2.0);
+    Kokkos::deep_copy(lower, -1.0);
+    Kokkos::deep_copy(upper, -1.0);
+
+    auto t_start = timer::now();
+    
+    // Solve all systems in parallel
+    Kokkos::parallel_for("parallel_tridiagonal", m2+1, KOKKOS_LAMBDA(const int j) {
+        const int block_start = j * (m1 + 1);
+        const int off_start = j * m1;
+        
+        // Forward sweep for system j
+        temp(block_start) = diag(block_start);
+        x(block_start) = b(block_start);
+        
+        for(int i = 1; i <= m1; i++) {
+            const int curr_idx = block_start + i;
+            const int off_idx = off_start + (i-1);
+            
+            double w = lower(off_idx) / temp(curr_idx-1);
+            temp(curr_idx) = diag(curr_idx) - w * upper(off_idx);
+            x(curr_idx) = b(curr_idx) - w * x(curr_idx-1);
+        }
+        
+        // Back substitution for system j
+        x(block_start + m1) /= temp(block_start + m1);
+        for(int i = m1-1; i >= 0; i--) {
+            const int curr_idx = block_start + i;
+            const int off_idx = off_start + i;
+            x(curr_idx) = (x(curr_idx) - upper(off_idx) * x(curr_idx+1)) 
+                         / temp(curr_idx);
+        }
+    });
+    
+    auto t_end = timer::now();
+    std::cout << "Parallel solve time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+}
+
+void test_hes_mat_fac() {
+    // Initialize Kokkos
+    Kokkos::initialize();
+    {
+        try {
+            std::cout << "Default execution space: " << Kokkos::DefaultExecutionSpace::name() << std::endl;
+
+            //test_heston_A0();
+            //test_heston_A1();
+            //test_heston_A2();
+            
+            //test_A0_multiply();
+            //test_parallel_tridiagonal();
+            //test_A1_multiply_and_implicit();
+            //test_A2_multiply_and_implicit();
+
+            //test_heston_A1_coalesc();
+            //test_A1_multiply_and_implicit_coalesc();
+
+            //test_heston_A1_flat();
+            //test_A1_flat_performance();
+            //test_clas_tridi();
+            //test_struct_tridi();
+            //test_free_struct_tridi();
+            //solve_tridiagonal_completely_flat();
+            test_tridiagonal_matrixfree2();
+            //test_tridiagonal_matrixfree_with_init();
+
+            //compare_tridiagonal_implementations();
+        }
+        catch (std::exception& e) {
+            std::cout << "Error: " << e.what() << std::endl;
+        }
+    } // All test objects destroyed here
+    Kokkos::finalize();
+}

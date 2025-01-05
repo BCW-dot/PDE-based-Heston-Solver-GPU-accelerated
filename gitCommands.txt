@@ -1,0 +1,9 @@
+# Add new/modified files
+cd ~/ADIKokkos
+git add .
+
+# Commit with message
+git commit -m "Your commit message describing changes"
+
+# Push to GitHub
+git push
