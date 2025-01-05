@@ -1236,7 +1236,12 @@ void test_A2_multiply_and_implicit() {
 */
 
 
+/*
 
+The two tests below show, that when we change the data layout of A1 into three diagonals, we do 
+not get any speedups compared to our initial 2D data layout. Both take the same amount of time 
+
+*/
 
 /*
 

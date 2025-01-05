@@ -188,7 +188,6 @@ inline void heston_A2Storage_gpu::multiply_parallel_s_and_v(const Kokkos::View<d
     Kokkos::fence();
 }
 
-
 inline void heston_A2Storage_gpu::solve_implicit(Kokkos::View<double*>& x, const Kokkos::View<double*>& b) {
     const int local_m1 = m1;
     const int local_m2 = m2;
@@ -272,6 +271,231 @@ inline void heston_A2Storage_gpu::solve_implicit(Kokkos::View<double*>& x, const
     });
     Kokkos::fence();
 }
+
+
+
+
+
+/*
+
+A2 shuffled class
+
+*/
+
+//this class comes from the FD when we shuffle the solution vector not wrt to the variance direction
+//but the stokc direction. Resulting in a similar structure as the A1 class
+
+class heston_A2_shuffled {
+private:
+    int m1, m2;  // Grid dimensions
+    
+    // Explicit system diagonals
+    Kokkos::View<double**> main_diags;     // [m1+1][m2+1]
+    Kokkos::View<double**> lower_diags;    // [m1+1][m2]
+    Kokkos::View<double**> lower2_diags;   // [m1+1][m2-1]
+    Kokkos::View<double**> upper_diags;    // [m1+1][m2]
+    Kokkos::View<double**> upper2_diags;   // [m1+1][m2-1]
+    
+    // Implicit system diagonals
+    Kokkos::View<double**> implicit_main_diags;
+    Kokkos::View<double**> implicit_lower_diags;
+    Kokkos::View<double**> implicit_lower2_diags;
+    Kokkos::View<double**> implicit_upper_diags;
+    Kokkos::View<double**> implicit_upper2_diags;
+    
+    // Temporary storage for implicit solve
+    Kokkos::View<double**> c_prime;      // [m1+1][m2+1]
+    Kokkos::View<double**> c2_prime;     // [m1+1][m2+1]
+    Kokkos::View<double**> d_prime;      // [m1+1][m2+1]
+
+public:
+    // Default constructor needed for some Kokkos operations
+    KOKKOS_FUNCTION
+    heston_A2_shuffled() = default;
+    
+    // Main constructor
+    heston_A2_shuffled(int m1_in, int m2_in);
+    
+    // Build matrix and implicit system
+    void build_matrix(const Grid& grid, double rho, double sigma, double r_d, double kappa, double eta);
+    void build_implicit(const double theta, const double delta_t);
+    
+    // Matrix operations
+    inline void multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result);
+    inline void solve_implicit(Kokkos::View<double*>& x, const Kokkos::View<double*>& b);
+    
+    // Getters
+    KOKKOS_INLINE_FUNCTION int get_m1() const { return m1; }
+    KOKKOS_INLINE_FUNCTION int get_m2() const { return m2; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_main_diags() const { return main_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_lower_diags() const { return lower_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_lower2_diags() const { return lower2_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_upper_diags() const { return upper_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_upper2_diags() const { return upper2_diags; }
+};
+
+// Multiply implementation
+inline void heston_A2_shuffled::multiply(const Kokkos::View<double*>& x, 
+                                       Kokkos::View<double*>& result) {
+    const int local_m1 = m1;
+    const int local_m2 = m2;
+    const auto local_main = main_diags;
+    const auto local_lower = lower_diags;
+    const auto local_lower2 = lower2_diags;
+    const auto local_upper = upper_diags;
+    const auto local_upper2 = upper2_diags;
+    
+    // Parallel over stock price blocks
+    Kokkos::parallel_for("A2_multiply", local_m1 + 1, KOKKOS_LAMBDA(const int i) {
+        const int block_offset = i * (local_m2 + 1);
+        
+        // Handle first row
+        result(block_offset) = local_main(i, 0) * x(block_offset);
+        if(0 < local_m2) {
+            result(block_offset) += local_upper(i, 0) * x(block_offset + 1);
+        }
+        if(1 < local_m2) {
+            result(block_offset) += local_upper2(i, 0) * x(block_offset + 2);
+        }
+        
+        // Handle second row
+        if(0 < local_m2) {
+            result(block_offset + 1) = local_lower(i, 0) * x(block_offset) +
+                                     local_main(i, 1) * x(block_offset + 1);
+            if(1 < local_m2) {
+                result(block_offset + 1) += local_upper(i, 1) * x(block_offset + 2);
+            }
+            if(2 < local_m2) {
+                result(block_offset + 1) += local_upper2(i, 1) * x(block_offset + 3);
+            }
+        }
+        
+        // Handle middle rows
+        for(int j = 2; j < local_m2 - 1; j++) {
+            result(block_offset + j) = local_lower2(i, j-2) * x(block_offset + j-2) +
+                                     local_lower(i, j-1) * x(block_offset + j-1) +
+                                     local_main(i, j) * x(block_offset + j) +
+                                     local_upper(i, j) * x(block_offset + j+1);
+            if(j < local_m2 - 2) {
+                result(block_offset + j) += local_upper2(i, j) * x(block_offset + j+2);
+            }
+        }
+        
+        // Handle second-to-last row
+        if(local_m2 > 2) {
+            const int j = local_m2 - 1;
+            result(block_offset + j) = local_lower2(i, j-2) * x(block_offset + j-2) +
+                                     local_lower(i, j-1) * x(block_offset + j-1) +
+                                     local_main(i, j) * x(block_offset + j);
+            if(j < local_m2) {
+                result(block_offset + j) += local_upper(i, j) * x(block_offset + j+1);
+            }
+        }
+        
+        // Handle last row
+        if(local_m2 > 1) {
+            const int j = local_m2;
+            result(block_offset + j) = local_lower2(i, j-2) * x(block_offset + j-2) +
+                                     local_lower(i, j-1) * x(block_offset + j-1) +
+                                     local_main(i, j) * x(block_offset + j);
+        }
+    });
+    Kokkos::fence();
+}
+
+// Pentadiagonal solver implementation
+inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x, 
+                                             const Kokkos::View<double*>& b) {
+    const int local_m1 = m1;
+    const int local_m2 = m2;
+    const auto local_main = implicit_main_diags;
+    const auto local_lower = implicit_lower_diags;
+    const auto local_lower2 = implicit_lower2_diags;
+    const auto local_upper = implicit_upper_diags;
+    const auto local_upper2 = implicit_upper2_diags;
+    
+    // Get temporary storage
+    const auto local_c = c_prime;
+    const auto local_c2 = c2_prime;
+    const auto local_d = d_prime;
+    
+    // Parallel over stock price blocks
+    Kokkos::parallel_for("A2_implicit_solve", local_m1 + 1, KOKKOS_LAMBDA(const int i) {
+        const int block_offset = i * (local_m2 + 1);
+        
+        // Forward elimination
+        // First row
+        local_c(i, 0) = local_upper(i, 0) / local_main(i, 0);
+        local_c2(i, 0) = local_upper2(i, 0) / local_main(i, 0);
+        local_d(i, 0) = b(block_offset) / local_main(i, 0);
+        
+        // Second row
+        if(local_m2 > 0) {
+            double den = local_main(i, 1) - local_lower(i, 0) * local_c(i, 0);
+            local_c(i, 1) = (local_upper(i, 1) - local_lower(i, 0) * local_c2(i, 0)) / den;
+            local_c2(i, 1) = local_upper2(i, 1) / den;
+            local_d(i, 1) = (b(block_offset + 1) - local_lower(i, 0) * local_d(i, 0)) / den;
+        }
+        
+        // Middle rows
+        for(int j = 2; j < local_m2 - 1; j++) {
+            double den = local_main(i, j) - 
+                        local_lower(i, j-1) * local_c(i, j-1) -
+                        local_lower2(i, j-2) * local_c2(i, j-2);
+            
+            local_c(i, j) = local_upper(i, j) / den;
+            local_c2(i, j) = local_upper2(i, j) / den;
+            
+            local_d(i, j) = (b(block_offset + j) - 
+                            local_lower(i, j-1) * local_d(i, j-1) -
+                            local_lower2(i, j-2) * local_d(i, j-2)) / den;
+        }
+        
+        // Last two rows (if they exist)
+        if(local_m2 > 2) {
+            // Second-to-last row
+            int j = local_m2 - 1;
+            double den = local_main(i, j) - 
+                        local_lower(i, j-1) * local_c(i, j-1) -
+                        local_lower2(i, j-2) * local_c2(i, j-2);
+            
+            local_c(i, j) = local_upper(i, j) / den;
+            local_d(i, j) = (b(block_offset + j) - 
+                            local_lower(i, j-1) * local_d(i, j-1) -
+                            local_lower2(i, j-2) * local_d(i, j-2)) / den;
+            
+            // Last row
+            j = local_m2;
+            den = local_main(i, j) - 
+                  local_lower(i, j-1) * local_c(i, j-1) -
+                  local_lower2(i, j-2) * local_c2(i, j-2);
+            
+            local_d(i, j) = (b(block_offset + j) - 
+                            local_lower(i, j-1) * local_d(i, j-1) -
+                            local_lower2(i, j-2) * local_d(i, j-2)) / den;
+        }
+        
+        // Back substitution
+        // Last value
+        x(block_offset + local_m2) = local_d(i, local_m2);
+        
+        // Second-to-last value
+        if(local_m2 > 0) {
+            int j = local_m2 - 1;
+            x(block_offset + j) = local_d(i, j) - 
+                                 local_c(i, j) * x(block_offset + j + 1);
+        }
+        
+        // Rest of values
+        for(int j = local_m2 - 2; j >= 0; j--) {
+            x(block_offset + j) = local_d(i, j) - 
+                                 local_c(i, j) * x(block_offset + j + 1) -
+                                 local_c2(i, j) * x(block_offset + j + 2);
+        }
+    });
+    Kokkos::fence();
+}
+
 
 
 void test_heston_A2_mat();

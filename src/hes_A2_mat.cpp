@@ -273,7 +273,6 @@ void test_heston_A2() {
     
 }
 
-
 void test_A2_multiply_and_implicit() {
     using timer = std::chrono::high_resolution_clock;
 
@@ -366,12 +365,270 @@ void test_A2_multiply_and_implicit() {
 }
 
 
+/*
+
+Shuffled class tests
+
+*/
+// Constructor implementation
+heston_A2_shuffled::heston_A2_shuffled(int m1_in, int m2_in) : m1(m1_in), m2(m2_in) {
+    // Allocate explicit system diagonals
+    main_diags = Kokkos::View<double**>("A2_main_diags", m1+1, m2+1);
+    lower_diags = Kokkos::View<double**>("A2_lower_diags", m1+1, m2);
+    lower2_diags = Kokkos::View<double**>("A2_lower2_diags", m1+1, m2-1);
+    upper_diags = Kokkos::View<double**>("A2_upper_diags", m1+1, m2);
+    upper2_diags = Kokkos::View<double**>("A2_upper2_diags", m1+1, m2-1);
+    
+    // Allocate implicit system diagonals
+    implicit_main_diags = Kokkos::View<double**>("A2_impl_main_diags", m1+1, m2+1);
+    implicit_lower_diags = Kokkos::View<double**>("A2_impl_lower_diags", m1+1, m2);
+    implicit_lower2_diags = Kokkos::View<double**>("A2_impl_lower2_diags", m1+1, m2-1);
+    implicit_upper_diags = Kokkos::View<double**>("A2_impl_upper_diags", m1+1, m2);
+    implicit_upper2_diags = Kokkos::View<double**>("A2_impl_upper2_diags", m1+1, m2-1);
+    
+    // Allocate temporary storage for implicit solve
+    c_prime = Kokkos::View<double**>("A2_c_prime", m1+1, m2+1);
+    c2_prime = Kokkos::View<double**>("A2_c2_prime", m1+1, m2+1);
+    d_prime = Kokkos::View<double**>("A2_d_prime", m1+1, m2+1);
+}
+
+// Build matrix implementation
+void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma, 
+                                    double r_d, double kappa, double eta) {
+    auto h_main = Kokkos::create_mirror_view(main_diags);
+    auto h_lower = Kokkos::create_mirror_view(lower_diags);
+    auto h_lower2 = Kokkos::create_mirror_view(lower2_diags);
+    auto h_upper = Kokkos::create_mirror_view(upper_diags);
+    auto h_upper2 = Kokkos::create_mirror_view(upper2_diags);
+    
+    // Initialize to zero
+    Kokkos::deep_copy(h_main, 0.0);
+    Kokkos::deep_copy(h_lower, 0.0);
+    Kokkos::deep_copy(h_lower2, 0.0);
+    Kokkos::deep_copy(h_upper, 0.0);
+    Kokkos::deep_copy(h_upper2, 0.0);
+    
+    // Build matrices block by block
+    // Build matrices block by block
+    for(int i = 0; i < m1 + 1; i++) {
+        for(int j = 0; j < m2 - 1; j++) {
+            double temp = kappa * (eta - grid.Vec_v[j]);
+            double temp2 = 0.5 * sigma * sigma * grid.Vec_v[j];
+            
+            // Add reaction term to main diagonal
+            h_main(i, j) += -0.5 * r_d;
+
+            if(j == 0) {
+                // v=0 case: uses gamma coefficients
+                h_main(i, j) += temp * gamma_v(j, 0, grid.Delta_v);
+                h_upper(i, j) += temp * gamma_v(j, 1, grid.Delta_v);
+                h_upper2(i, j) += temp * gamma_v(j, 2, grid.Delta_v);
+            } 
+            if(grid.Vec_v[j] > 1.0) {
+                // High variance case: uses alpha coefficients
+                h_lower2(i, j-2) += temp * alpha_v(j, -2, grid.Delta_v);
+                h_lower(i, j-1) += temp * alpha_v(j, -1, grid.Delta_v);
+                h_main(i, j) += temp * alpha_v(j, 0, grid.Delta_v);
+
+                // Add diffusion terms
+                h_lower(i, j-1) += temp2 * delta_v(j-1, -1, grid.Delta_v);
+                h_main(i, j) += temp2 * delta_v(j-1, 0, grid.Delta_v);
+                h_upper(i, j) += temp2 * delta_v(j-1, 1, grid.Delta_v);
+            } 
+            else {
+                // Standard case: uses beta coefficients
+                h_lower(i, j-1) += temp * beta_v(j-1, -1, grid.Delta_v) + 
+                                            temp2 * delta_v(j-1, -1, grid.Delta_v);
+                h_main(i, j) += temp * beta_v(j-1, 0, grid.Delta_v) + 
+                            temp2 * delta_v(j-1, 0, grid.Delta_v);
+                h_upper(i, j) += temp * beta_v(j-1, 1, grid.Delta_v) + 
+                                            temp2 * delta_v(j-1, 1, grid.Delta_v);
+            }
+        }
+    }
+    
+    // Copy to device
+    Kokkos::deep_copy(main_diags, h_main);
+    Kokkos::deep_copy(lower_diags, h_lower);
+    Kokkos::deep_copy(lower2_diags, h_lower2);
+    Kokkos::deep_copy(upper_diags, h_upper);
+    Kokkos::deep_copy(upper2_diags, h_upper2);
+}
+
+// Build implicit system
+void heston_A2_shuffled::build_implicit(const double theta, const double delta_t) {
+    auto h_impl_main = Kokkos::create_mirror_view(implicit_main_diags);
+    auto h_impl_lower = Kokkos::create_mirror_view(implicit_lower_diags);
+    auto h_impl_lower2 = Kokkos::create_mirror_view(implicit_lower2_diags);
+    auto h_impl_upper = Kokkos::create_mirror_view(implicit_upper_diags);
+    auto h_impl_upper2 = Kokkos::create_mirror_view(implicit_upper2_diags);
+    
+    auto h_main = Kokkos::create_mirror_view(main_diags);
+    auto h_lower = Kokkos::create_mirror_view(lower_diags);
+    auto h_lower2 = Kokkos::create_mirror_view(lower2_diags);
+    auto h_upper = Kokkos::create_mirror_view(upper_diags);
+    auto h_upper2 = Kokkos::create_mirror_view(upper2_diags);
+    
+    // Copy explicit matrices to host
+    Kokkos::deep_copy(h_main, main_diags);
+    Kokkos::deep_copy(h_lower, lower_diags);
+    Kokkos::deep_copy(h_lower2, lower2_diags);
+    Kokkos::deep_copy(h_upper, upper_diags);
+    Kokkos::deep_copy(h_upper2, upper2_diags);
+
+    // Initialize to zero
+    //do we need to init impl diagonals to zero first?
+    //dont think so, since we are setting them to zero in for loops
+    //since upper2 is zero after the first entry
+    
+    // Build implicit matrices
+    for(int i = 0; i < m1 + 1; i++) {
+        // Main diagonal: I - theta*dt*A
+        for(int j = 0; j < m2 + 1; j++) {
+            h_impl_main(i, j) = 1.0 - theta * delta_t * h_main(i, j);
+        }
+        
+        // Off diagonals: -theta*dt*A
+        for(int j = 0; j < m2; j++) {
+            h_impl_lower(i, j) = -theta * delta_t * h_lower(i, j);
+            h_impl_upper(i, j) = -theta * delta_t * h_upper(i, j);
+        }
+        
+        for(int j = 0; j < m2-1; j++) {
+            h_impl_lower2(i, j) = -theta * delta_t * h_lower2(i, j);
+            h_impl_upper2(i, j) = -theta * delta_t * h_upper2(i, j);
+        }
+    }
+    
+    // Copy back to device
+    Kokkos::deep_copy(implicit_main_diags, h_impl_main);
+    Kokkos::deep_copy(implicit_lower_diags, h_impl_lower);
+    Kokkos::deep_copy(implicit_lower2_diags, h_impl_lower2);
+    Kokkos::deep_copy(implicit_upper_diags, h_impl_upper);
+    Kokkos::deep_copy(implicit_upper2_diags, h_impl_upper2);
+}
+
+
+void test_heston_A2_shuffled() {
+    // Test dimensions
+    int m1 = 5;
+    int m2 = 5;
+    Grid grid = create_test_grid(m1, m2);
+    
+    // Create and build A2 matrix
+    heston_A2_shuffled A2(m1, m2);
+    
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double kappa = 1.5;
+    double eta = 0.04;
+    
+    A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    
+    // Get Views using getters
+    auto main = A2.get_main_diags();
+    auto lower = A2.get_lower_diags();
+    auto lower2 = A2.get_lower2_diags();
+    auto upper = A2.get_upper_diags();
+    auto upper2 = A2.get_upper2_diags();
+
+    // Create mirror views
+    auto h_main = Kokkos::create_mirror_view(main);
+    auto h_lower = Kokkos::create_mirror_view(lower);
+    auto h_lower2 = Kokkos::create_mirror_view(lower2);
+    auto h_upper = Kokkos::create_mirror_view(upper);
+    auto h_upper2 = Kokkos::create_mirror_view(upper2);
+    
+    // Copy to host
+    Kokkos::deep_copy(h_main, main);
+    Kokkos::deep_copy(h_lower, lower);
+    Kokkos::deep_copy(h_lower2, lower2);
+    Kokkos::deep_copy(h_upper, upper);
+    Kokkos::deep_copy(h_upper2, upper2);
+    
+    // Print matrices
+    std::cout << "A2 Shuffled Matrix Structure:\n";
+    std::cout << "-------------------------\n";
+    
+    for(int i = 0; i < m1 + 1; i++) {
+        std::cout << "\nBlock i=" << i << ":\n";
+        // Print all diagonals for this block
+        std::cout << "Second lower diagonal: ";
+        for(int j = 0; j < m2-1; j++) std::cout << h_lower2(i,j) << " ";
+        std::cout << "\nFirst lower diagonal:  ";
+        for(int j = 0; j < m2; j++) std::cout << h_lower(i,j) << " ";
+        std::cout << "\nMain diagonal:         ";
+        for(int j = 0; j < m2+1; j++) std::cout << h_main(i,j) << " ";
+        std::cout << "\nFirst upper diagonal:  ";
+        for(int j = 0; j < m2; j++) std::cout << h_upper(i,j) << " ";
+        std::cout << "\nSecond upper diagonal: ";
+        for(int j = 0; j < m2-1; j++) std::cout << h_upper2(i,j) << " ";
+        std::cout << "\n";
+    }
+
+    // Print dimensions
+    std::cout << "\nDimensions:\n";
+    std::cout << "m1: " << A2.get_m1() << ", m2: " << A2.get_m2() << "\n";
+    
+    // Test implicit system building and solving
+    double theta = 0.8;
+    double delta_t = 1.0/14;
+    A2.build_implicit(theta, delta_t);
+
+    // Create test vectors
+    const int total_size = (m1 + 1) * (m2 + 1);
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> b("b", total_size);
+    Kokkos::View<double*> result("result", total_size);
+    
+    // Initialize with random values
+    auto h_b = Kokkos::create_mirror_view(b);
+    auto h_x = Kokkos::create_mirror_view(x);
+    for (int i = 0; i < total_size; ++i) {
+        h_b(i) = std::rand() / (RAND_MAX + 1.0);
+        h_x(i) = std::rand() / (RAND_MAX + 1.0);
+    }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(x, h_x);
+
+    // Test implicit solve
+    using timer = std::chrono::high_resolution_clock;
+    auto t_start = timer::now();
+    A2.solve_implicit(x, b);
+    auto t_end = timer::now();
+    
+    std::cout << "Implicit solve time: "
+                << std::chrono::duration<double>(t_end - t_start).count()
+                << " seconds" << std::endl;
+
+    // Verify solution by computing residual
+    A2.multiply(x, result);
+    
+    // Compute residual
+    auto h_result = Kokkos::create_mirror_view(result);
+    Kokkos::deep_copy(h_result, result);
+    Kokkos::deep_copy(h_x, x);  // Get latest x values
+    
+    double residual = 0.0;
+    for(int i = 0; i < total_size; i++) {
+        double res = h_x(i) - theta * delta_t * h_result(i) - h_b(i);
+        residual += res * res;
+    }
+    residual = std::sqrt(residual);
+    
+    std::cout << "Residual norm: " << residual << std::endl;
+    
+}
+
+
 void test_heston_A2_mat(){
     Kokkos::initialize();
     {
         try{
             //test_heston_A2();
-            test_A2_multiply_and_implicit();
+            //test_A2_multiply_and_implicit();
+            test_heston_A2_shuffled();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;
