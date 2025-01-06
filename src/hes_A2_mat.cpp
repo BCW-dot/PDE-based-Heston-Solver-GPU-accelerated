@@ -54,8 +54,10 @@ void heston_A2Storage_gpu::build_matrix(const Grid& grid, double rho, double sig
         // Use l_9c = [0,1,2]
         h_main(i) += temp * gamma_v(0, 0, grid.Delta_v);
         h_upper(i) += temp * gamma_v(0, 1, grid.Delta_v);
-        h_upper2(i) = temp * gamma_v(0, 2, grid.Delta_v);
+        h_upper2(i) += temp * gamma_v(0, 2, grid.Delta_v);
     }
+    
+    
 
     
     // Handle remaining j values
@@ -436,11 +438,10 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
             if(j == 0) {
                 // v=0 case: uses gamma coefficients
                 h_main(i, j) += temp * gamma_v(j, 0, grid.Delta_v);
-                //std::cout << h_main(i, 0) << std::endl;
-                //std::cout << h_main(1,0) << std::endl;
                 h_upper(i, j) += temp * gamma_v(j, 1, grid.Delta_v);
                 h_upper2(i, j) += temp * gamma_v(j, 2, grid.Delta_v);
             } 
+            
             else{
                 // Standard case: uses beta coefficients
                 h_lower(i, j-1) += temp * beta_v(j-1, -1, grid.Delta_v) + 
@@ -517,8 +518,8 @@ void heston_A2_shuffled::build_implicit(const double theta, const double delta_t
 
 void test_heston_A2_shuffled() {
     // Test dimensions
-    int m1 = 2;
-    int m2 = 20;
+    int m1 = 300;
+    int m2 = 100;
     Grid grid = create_test_grid(m1, m2);
     
     // Create and build A2 matrix
@@ -556,7 +557,7 @@ void test_heston_A2_shuffled() {
     // Print matrices
     std::cout << "A2 Shuffled Matrix Structure:\n";
     std::cout << "-------------------------\n";
-    
+    /*
     for(int i = 0; i < m1 + 1; i++) {
         std::cout << "\nBlock i=" << i << ":\n";
         // Print all diagonals for this block
@@ -572,7 +573,7 @@ void test_heston_A2_shuffled() {
         for(int j = 0; j < m2-1; j++) std::cout << h_upper2(i,j) << " ";
         std::cout << "\n";
     }
-    
+    */
     // Print dimensions
     std::cout << "\nDimensions:\n";
     std::cout << "m1: " << A2.get_m1() << ", m2: " << A2.get_m2() << "\n";
@@ -725,7 +726,7 @@ void compare_A2_implementations() {
     
     // Time original implementation
     auto t1 = timer::now();
-    A2_original.multiply(x, result_orig);
+    A2_original.multiply_parallel_s_and_v(x, result_orig);
     auto t2 = timer::now();
     std::cout << "Original multiply time: " 
               << std::chrono::duration<double>(t2-t1).count() << "s\n";
@@ -811,7 +812,399 @@ void compare_A2_implementations() {
     std::cout << "Max difference in solve results: " << max_diff << "\n";
 }
 
+void debug_A2_implementations() {
+    // Test with smaller dimensions for easier debugging
+    const int m1 = 10;
+    const int m2 = 10;
+    std::cout << "Testing A2 implementations with dimensions m1=" << m1 << ", m2=" << m2 << "\n\n";
 
+    // Create grid and parameters
+    Grid grid = create_test_grid(m1, m2);
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double r_d = 0.025;
+    const double kappa = 1.5;
+    const double eta = 0.04;
+    
+    // Create both A2 implementations
+    heston_A2Storage_gpu A2_original(m1, m2);
+    heston_A2_shuffled A2_shuffled(m1, m2);
+    
+    // Build matrices
+    A2_original.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuffled.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Create test vectors
+    const int total_size = (m1 + 1) * (m2 + 1);
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> x_shuffled("x_shuffled", total_size);
+    Kokkos::View<double*> result_orig("result_orig", total_size);
+    Kokkos::View<double*> result_shuf("result_shuf", total_size);
+    Kokkos::View<double*> result_unshuf("result_unshuf", total_size);
+
+    // Initialize x with sequential values
+    auto h_x = Kokkos::create_mirror_view(x);
+    for (int i = 0; i < total_size; i++) {
+        h_x(i) = i + 1;  // Start from 1 for easier tracking
+    }
+    Kokkos::deep_copy(x, h_x);
+
+    // Print original vector layout
+    std::cout << "Original vector layout (by variance levels):\n";
+    for (int j = 0; j <= m2; j++) {
+        std::cout << "v" << j << ": ";
+        for (int i = 0; i <= m1; i++) {
+            std::cout << h_x(j*(m1+1) + i) << " ";
+        }
+        std::cout << "\n";
+    }
+
+    // Shuffle input
+    shuffle_vector(x, x_shuffled, m1, m2);
+    
+    // Print shuffled vector layout
+    auto h_x_shuffled = Kokkos::create_mirror_view(x_shuffled);
+    Kokkos::deep_copy(h_x_shuffled, x_shuffled);
+    std::cout << "\nShuffled vector layout (by stock prices):\n";
+    for (int i = 0; i <= m1; i++) {
+        std::cout << "s" << i << ": ";
+        for (int j = 0; j <= m2; j++) {
+            std::cout << h_x_shuffled(i*(m2+1) + j) << " ";
+        }
+        std::cout << "\n";
+    }
+
+    // Test multiplication
+    std::cout << "\nTesting multiplication:\n";
+    A2_original.multiply(x, result_orig);
+    A2_shuffled.multiply(x_shuffled, result_shuf);
+    
+    // Unshuffle result for comparison
+    unshuffle_vector(result_shuf, result_unshuf, m1, m2);
+
+    // Compare multiplication results
+    auto h_result_orig = Kokkos::create_mirror_view(result_orig);
+    auto h_result_unshuf = Kokkos::create_mirror_view(result_unshuf);
+    Kokkos::deep_copy(h_result_orig, result_orig);
+    Kokkos::deep_copy(h_result_unshuf, result_unshuf);
+
+    std::cout << "Original multiplication results (first block):\n";
+    for(int i = 0; i <= m1; i++) {
+        std::cout << h_result_orig(i) << " ";
+    }
+    std::cout << "\n\nShuffled multiplication results (first block):\n";
+    for(int i = 0; i <= m1; i++) {
+        std::cout << h_result_unshuf(i) << " ";
+    }
+    std::cout << "\n";
+
+    // Now test implicit solve
+    double theta = 0.8;
+    double delta_t = 1.0/20;
+    A2_original.build_implicit(theta, delta_t);
+    A2_shuffled.build_implicit(theta, delta_t);
+
+    // Create RHS vector b with sequential values
+    Kokkos::View<double*> b("b", total_size);
+    Kokkos::View<double*> b_shuffled("b_shuffled", total_size);
+    auto h_b = Kokkos::create_mirror_view(b);
+    for (int i = 0; i < total_size; i++) {
+        h_b(i) = i + 1;
+    }
+    Kokkos::deep_copy(b, h_b);
+    shuffle_vector(b, b_shuffled, m1, m2);
+
+    // Reset x vectors
+    Kokkos::deep_copy(x, h_x);
+    shuffle_vector(x, x_shuffled, m1, m2);
+
+    // Solve
+    std::cout << "\nTesting implicit solve:\n";
+    A2_original.solve_implicit(x, b);
+    A2_shuffled.solve_implicit(x_shuffled, b_shuffled);
+
+    // Compare solve results
+    Kokkos::View<double*> x_unshuf("x_unshuf", total_size);
+    unshuffle_vector(x_shuffled, x_unshuf, m1, m2);
+    
+    auto h_x_orig = Kokkos::create_mirror_view(x);
+    auto h_x_unshuf = Kokkos::create_mirror_view(x_unshuf);
+    Kokkos::deep_copy(h_x_orig, x);
+    Kokkos::deep_copy(h_x_unshuf, x_unshuf);
+
+    std::cout << "Original solve results (first block):\n";
+    for(int i = 0; i <= m1; i++) {
+        std::cout << h_x_orig(i) << " ";
+    }
+    std::cout << "\n\nShuffled solve results (first block):\n";
+    for(int i = 0; i <= m1; i++) {
+        std::cout << h_x_unshuf(i) << " ";
+    }
+    std::cout << "\n";
+
+    // Print per-element differences for first few entries
+    std::cout << "\nDetailed differences in first few entries:\n";
+    std::cout << "Index\tOriginal\tShuffled\tDifference\n";
+    for(int i = 0; i < std::min(10, total_size); i++) {
+        double diff = h_x_orig(i) - h_x_unshuf(i);
+        std::cout << i << "\t" 
+                 << h_x_orig(i) << "\t\t"
+                 << h_x_unshuf(i) << "\t\t"
+                 << diff << "\n";
+    }
+}
+
+void compare_A2_matrices() {
+    // Use same small dimensions
+    const int m1 = 10;
+    const int m2 = 10;
+    
+    Grid grid = create_test_grid(m1, m2);
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double r_d = 0.025;
+    const double kappa = 1.5;
+    const double eta = 0.04;
+    
+    // Create both implementations
+    heston_A2Storage_gpu A2_original(m1, m2);
+    heston_A2_shuffled A2_shuffled(m1, m2);
+    
+    // Build matrices
+    A2_original.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuffled.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    
+    // Get diagonal Views
+    auto orig_main = A2_original.get_main_diag();
+    auto orig_lower = A2_original.get_lower_diag();
+    auto orig_upper = A2_original.get_upper_diag();
+    auto orig_upper2 = A2_original.get_upper2_diag();
+    
+    auto shuf_main = A2_shuffled.get_main_diags();
+    auto shuf_lower = A2_shuffled.get_lower_diags();
+    auto shuf_lower2 = A2_shuffled.get_lower2_diags();
+    auto shuf_upper = A2_shuffled.get_upper_diags();
+    auto shuf_upper2 = A2_shuffled.get_upper2_diags();
+    
+    // Create host mirrors
+    auto h_orig_main = Kokkos::create_mirror_view(orig_main);
+    auto h_orig_lower = Kokkos::create_mirror_view(orig_lower);
+    auto h_orig_upper = Kokkos::create_mirror_view(orig_upper);
+    auto h_orig_upper2 = Kokkos::create_mirror_view(orig_upper2);
+    
+    auto h_shuf_main = Kokkos::create_mirror_view(shuf_main);
+    auto h_shuf_lower = Kokkos::create_mirror_view(shuf_lower);
+    auto h_shuf_lower2 = Kokkos::create_mirror_view(shuf_lower2);
+    auto h_shuf_upper = Kokkos::create_mirror_view(shuf_upper);
+    auto h_shuf_upper2 = Kokkos::create_mirror_view(shuf_upper2);
+    
+    // Copy to host
+    Kokkos::deep_copy(h_orig_main, orig_main);
+    Kokkos::deep_copy(h_orig_lower, orig_lower);
+    Kokkos::deep_copy(h_orig_upper, orig_upper);
+    Kokkos::deep_copy(h_orig_upper2, orig_upper2);
+    
+    Kokkos::deep_copy(h_shuf_main, shuf_main);
+    Kokkos::deep_copy(h_shuf_lower, shuf_lower);
+    Kokkos::deep_copy(h_shuf_lower2, shuf_lower2);
+    Kokkos::deep_copy(h_shuf_upper, shuf_upper);
+    Kokkos::deep_copy(h_shuf_upper2, shuf_upper2);
+    
+    // Print comparison for first few blocks
+    //std::cout << std::scientific << std::setprecision(6);
+    
+    // First compare j=0 block (special case)
+    std::cout << "\nj=0 Block Comparison:\n";
+    std::cout << "Original A2:\n";
+    std::cout << "main:   ";
+    for(int i = 0; i <= m1; i++) {
+        std::cout << h_orig_main(i) << " ";
+    }
+    std::cout << "\nupper:  ";
+    for(int i = 0; i < m1; i++) {
+        std::cout << h_orig_upper(i) << " ";
+    }
+    std::cout << "\nupper2: ";
+    for(int i = 0; i < m1+1; i++) {
+        std::cout << h_orig_upper2(i) << " ";
+    }
+    
+    std::cout << "\n\nShuffled A2 (first stock price block):\n";
+    std::cout << "main:   ";
+    for(int j = 0; j <= m2; j++) {
+        std::cout << h_shuf_main(0,j) << " ";
+    }
+    std::cout << "\nupper:  ";
+    for(int j = 0; j < m2; j++) {
+        std::cout << h_shuf_upper(0,j) << " ";
+    }
+    std::cout << "\nupper2: ";
+    for(int j = 0; j < m2-1; j++) {
+        std::cout << h_shuf_upper2(0,j) << " ";
+    }
+    
+    // Now look at a middle block (j=1)
+    std::cout << "\n\nj=1 Block Comparison:\n";
+    std::cout << "Original A2:\n";
+    const int block_size = m1 + 1;
+    std::cout << "lower:  ";
+    for(int i = 0; i < block_size; i++) {
+        std::cout << h_orig_lower(i) << " ";
+    }
+    std::cout << "\nmain:   ";
+    for(int i = 0; i < block_size; i++) {
+        std::cout << h_orig_main(block_size + i) << " ";
+    }
+    std::cout << "\nupper:  ";
+    for(int i = 0; i < block_size - 1; i++) {
+        std::cout << h_orig_upper(block_size + i) << " ";
+    }
+    
+    std::cout << "\n\nShuffled A2 (second stock price block):\n";
+    std::cout << "lower2: ";
+    for(int j = 0; j < m2-1; j++) {
+        std::cout << h_shuf_lower2(1,j) << " ";
+    }
+    std::cout << "\nlower:  ";
+    for(int j = 0; j < m2; j++) {
+        std::cout << h_shuf_lower(1,j) << " ";
+    }
+    std::cout << "\nmain:   ";
+    for(int j = 0; j <= m2; j++) {
+        std::cout << h_shuf_main(1,j) << " ";
+    }
+    std::cout << "\nupper:  ";
+    for(int j = 0; j < m2; j++) {
+        std::cout << h_shuf_upper(1,j) << " ";
+    }
+    std::cout << "\nupper2: ";
+    for(int j = 0; j < m2-1; j++) {
+        std::cout << h_shuf_upper2(1,j) << " ";
+    }
+    
+    // Build and compare implicit systems
+    double theta = 0.8;
+    double delta_t = 1.0/20;
+    A2_original.build_implicit(theta, delta_t);
+    A2_shuffled.build_implicit(theta, delta_t);
+    
+    // Get implicit diagonal Views
+    auto orig_impl_main = A2_original.get_implicit_main_diag();
+    auto orig_impl_lower = A2_original.get_implicit_lower_diag();
+    auto orig_impl_upper = A2_original.get_implicit_upper_diag();
+    auto orig_impl_upper2 = A2_original.get_implicit_upper2_diag();
+    
+    auto h_orig_impl_main = Kokkos::create_mirror_view(orig_impl_main);
+    auto h_orig_impl_lower = Kokkos::create_mirror_view(orig_impl_lower);
+    auto h_orig_impl_upper = Kokkos::create_mirror_view(orig_impl_upper);
+    auto h_orig_impl_upper2 = Kokkos::create_mirror_view(orig_impl_upper2);
+    
+    Kokkos::deep_copy(h_orig_impl_main, orig_impl_main);
+    Kokkos::deep_copy(h_orig_impl_lower, orig_impl_lower);
+    Kokkos::deep_copy(h_orig_impl_upper, orig_impl_upper);
+    Kokkos::deep_copy(h_orig_impl_upper2, orig_impl_upper2);
+    
+    // Print first block of implicit system
+    std::cout << "\n\nImplicit System j=0 Block:\n";
+    std::cout << "Original A2:\n";
+    std::cout << "main:   ";
+    for(int i = 0; i <= m1; i++) {
+        std::cout << h_orig_impl_main(i) << " ";
+    }
+    std::cout << "\nupper:  ";
+    for(int i = 0; i < m1; i++) {
+        std::cout << h_orig_impl_upper(i) << " ";
+    }
+    std::cout << "\nupper2: ";
+    for(int i = 0; i < m1+1; i++) {
+        std::cout << h_orig_impl_upper2(i) << " ";
+    }
+    
+    auto shuf_impl_main = A2_shuffled.get_implicit_main_diags();
+    auto h_shuf_impl_main = Kokkos::create_mirror_view(shuf_impl_main);
+    Kokkos::deep_copy(h_shuf_impl_main, shuf_impl_main);
+    
+    std::cout << "\n\nShuffled A2 Implicit (first stock price block):\n";
+    std::cout << "main:   ";
+    for(int j = 0; j <= m2; j++) {
+        std::cout << h_shuf_impl_main(0,j) << " ";
+    }
+}
+
+void test_shuffle_functions() {
+    using timer = std::chrono::high_resolution_clock;
+    // Test dimensions
+    const int m1 = 300;  // Small dimensions for easy debugging
+    const int m2 = 100;
+    const int total_size = (m1 + 1) * (m2 + 1);
+    
+    // Create test vectors
+    Kokkos::View<double*> original("original", total_size);
+    Kokkos::View<double*> shuffled("shuffled", total_size);
+    Kokkos::View<double*> unshuffled("unshuffled", total_size);
+    
+    // Initialize original with sequential values for easy checking
+    auto h_original = Kokkos::create_mirror_view(original);
+    for (int i = 0; i < total_size; i++) {
+        h_original(i) = i;
+    }
+    Kokkos::deep_copy(original, h_original);
+    
+    // Perform shuffle and unshuffle
+    for(int i = 0; i<5; i++){
+        auto t1 = timer::now();
+        shuffle_vector(original, shuffled, m1, m2);
+        unshuffle_vector(shuffled, unshuffled, m1, m2);
+        auto t2 = timer::now();
+        std::cout << "Shuffle and reshuffle time: " 
+                << std::chrono::duration<double>(t2-t1).count() << "s\n";
+    }
+
+    
+    // Check results
+    auto h_shuffled = Kokkos::create_mirror_view(shuffled);
+    auto h_unshuffled = Kokkos::create_mirror_view(unshuffled);
+    Kokkos::deep_copy(h_shuffled, shuffled);
+    Kokkos::deep_copy(h_unshuffled, unshuffled);
+    
+    // Print original layout (v-first)
+    /*
+    std::cout << "Original layout (by variance):\n";
+    for (int j = 0; j <= m2; j++) {
+        std::cout << "v" << j << ": ";
+        for (int i = 0; i <= m1; i++) {
+            std::cout << h_original(j*(m1+1) + i) << " ";
+        }
+        std::cout << "\n";
+    }
+    
+    // Print shuffled layout (s-first)
+    std::cout << "\nShuffled layout (by stock price):\n";
+    for (int i = 0; i <= m1; i++) {
+        std::cout << "s" << i << ": ";
+        for (int j = 0; j <= m2; j++) {
+            std::cout << h_shuffled(i*(m2+1) + j) << " ";
+        }
+        std::cout << "\n";
+    }
+    */
+    // Print unshuffled and check against original
+    //std::cout << "\nUnshuffled layout (should match original):\n";
+    double max_diff = 0.0;
+    for (int j = 0; j <= m2; j++) {
+        //std::cout << "v" << j << ": ";
+        for (int i = 0; i <= m1; i++) {
+            //std::cout << h_unshuffled(j*(m1+1) + i) << " ";
+            max_diff = std::max(max_diff, 
+                              std::abs(h_original(j*(m1+1) + i) - 
+                                     h_unshuffled(j*(m1+1) + i)));
+        }
+        //std::cout << "\n";
+    }
+    
+    std::cout << "\nMaximum difference between original and unshuffled: " 
+              << max_diff << "\n";
+}
 
 
 void test_heston_A2_mat(){
@@ -820,8 +1213,14 @@ void test_heston_A2_mat(){
         try{
             //test_heston_A2();
             //test_A2_multiply_and_implicit();
+
             //test_heston_A2_shuffled();
-            compare_A2_implementations();
+
+            //test_shuffle_functions();
+            //compare_A2_implementations();
+            debug_A2_implementations();
+            //compare_A2_matrices();
+
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;

@@ -57,6 +57,12 @@ public:
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_lower_diag() const { return lower_diag; }
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_upper_diag() const { return upper_diag; }
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_upper2_diag() const { return upper2_diag; }
+
+    //for debugging:
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_main_diag() const { return main_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_lower_diag() const { return lower_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_upper_diag() const { return upper_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_upper2_diag() const { return upper2_diag; }
 };
 
 /*
@@ -332,6 +338,13 @@ public:
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_lower2_diags() const { return lower2_diags; }
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_upper_diags() const { return upper_diags; }
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_upper2_diags() const { return upper2_diags; }
+
+    //for debugging
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_main_diags() const { return main_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_lower_diags() const { return lower_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_lower2_diags() const { return lower2_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_upper_diags() const { return upper_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_upper2_diags() const { return upper2_diags; }
 };
 
 // Multiply implementation
@@ -497,7 +510,14 @@ inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x,
     Kokkos::fence();
 }
 
+inline void shuffle_vector(const Kokkos::View<double*>& input, 
+                         Kokkos::View<double*>& output,
+                         const int m1, 
+                         const int m2);
 
-
+inline void unshuffle_vector(const Kokkos::View<double*>& input, 
+                              Kokkos::View<double*>& output,
+                              const int m1, 
+                              const int m2);
 
 void test_heston_A2_mat();
