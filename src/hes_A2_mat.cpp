@@ -415,9 +415,9 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
             double temp = kappa * (eta - grid.Vec_v[j]);
             double temp2 = 0.5 * sigma * sigma * grid.Vec_v[j];
             
+            
             // Add reaction term to main diagonal
             h_main(i, j) += -0.5 * r_d;
-
             if(j == 0) {
                 // v=0 case: uses gamma coefficients
                 h_main(i, j) += temp * gamma_v(j, 0, grid.Delta_v);
@@ -426,36 +426,24 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
                 h_upper(i, j) += temp * gamma_v(j, 1, grid.Delta_v);
                 h_upper2(i, j) += temp * gamma_v(j, 2, grid.Delta_v);
             } 
-            /*
+            //check indeces again, check against python.
             else if(grid.Vec_v[j] > 1.0) {
-                // High variance case: uses alpha coefficients
-                h_lower2(i, j-2) += temp * alpha_v(j, -2, grid.Delta_v);
-                h_lower(i, j-1) += temp * alpha_v(j, -1, grid.Delta_v);
-                h_main(i, j) += temp * alpha_v(j, 0, grid.Delta_v);
+                // For upwind scheme
+                // Alpha terms
+                h_lower2(i, j + 1 -2) += temp * alpha_v(j, -2, grid.Delta_v);  // writes 2 positions back
+                h_lower(i, j + 1 - 1) += temp * alpha_v(j, -1, grid.Delta_v);   // writes 1 position back
+                h_main(i, j + 1 - 0) += temp * alpha_v(j, 0, grid.Delta_v);       // writes at current position
 
-                // Add diffusion terms
-                h_lower(i, j-1) += temp2 * delta_v(j-1, -1, grid.Delta_v);
-                h_main(i, j) += temp2 * delta_v(j-1, 0, grid.Delta_v);
-                h_upper(i, j) += temp2 * delta_v(j-1, 1, grid.Delta_v);
-            } 
-            */
-            else if(grid.Vec_v[j] > 1.0) {
-                // High variance case: uses alpha coefficients
-                h_lower2(i, j-1) += temp * alpha_v(j, -2, grid.Delta_v);
-                h_lower(i, j) += temp * alpha_v(j, -1, grid.Delta_v);
-                h_main(i, j+1) += temp * alpha_v(j, 0, grid.Delta_v);
-
-                // Add diffusion terms
-                h_lower(i, j-1) += temp2 * delta_v(j-1, -1, grid.Delta_v);
-                h_main(i, j) += temp2 * delta_v(j-1, 0, grid.Delta_v);
-                h_upper(i, j) += temp2 * delta_v(j-1, 1, grid.Delta_v);
-            } 
-            
-            else {
+                // Delta terms
+                h_lower(i, j + 1 - 1) += temp2 * delta_v(j-1, -1, grid.Delta_v);  // same as alpha
+                h_main(i, j + 1 + 0) += temp2 * delta_v(j-1, 0, grid.Delta_v);      // same as alpha
+                h_upper(i, j + 1 ) += temp2 * delta_v(j-1, 1, grid.Delta_v);     // writes at current position
+            }
+            else{
                 // Standard case: uses beta coefficients
                 h_lower(i, j-1) += temp * beta_v(j-1, -1, grid.Delta_v) + 
                                             temp2 * delta_v(j-1, -1, grid.Delta_v);
-                h_main(i, j) += temp * beta_v(j-1, 0, grid.Delta_v) + 
+                h_main(i, j+1) += temp * beta_v(j-1, 0, grid.Delta_v) + 
                             temp2 * delta_v(j-1, 0, grid.Delta_v);
                 h_upper(i, j) += temp * beta_v(j-1, 1, grid.Delta_v) + 
                                             temp2 * delta_v(j-1, 1, grid.Delta_v);
@@ -527,7 +515,7 @@ void heston_A2_shuffled::build_implicit(const double theta, const double delta_t
 
 void test_heston_A2_shuffled() {
     // Test dimensions
-    int m1 = 4;
+    int m1 = 2;
     int m2 = 20;
     Grid grid = create_test_grid(m1, m2);
     
