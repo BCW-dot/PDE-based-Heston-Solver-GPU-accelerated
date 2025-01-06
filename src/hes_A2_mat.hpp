@@ -404,6 +404,7 @@ inline void heston_A2_shuffled::multiply(const Kokkos::View<double*>& x,
 }
 
 // Pentadiagonal solver implementation
+
 inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x, 
                                              const Kokkos::View<double*>& b) {
     const int local_m1 = m1;
@@ -495,6 +496,7 @@ inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x,
     });
     Kokkos::fence();
 }
+
 
 
 
