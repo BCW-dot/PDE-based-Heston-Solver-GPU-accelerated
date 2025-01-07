@@ -52,7 +52,7 @@ void heston_A2Storage_gpu::build_matrix(const Grid& grid, double rho, double sig
     for(int i = 0; i < m1+1; i++) {
         double temp = kappa * (eta - grid.Vec_v[0]);
         // Use l_9c = [0,1,2]
-        h_main(i) += temp * gamma_v(0, 0, grid.Delta_v);
+        h_main(i) += temp * gamma_v(0, 0, grid.Delta_v)  - 0.5 * r_d;;
         h_upper(i) += temp * gamma_v(0, 1, grid.Delta_v);
         h_upper2(i) += temp * gamma_v(0, 2, grid.Delta_v);
     }
@@ -203,8 +203,8 @@ void heston_A2Storage_gpu::build_implicit(const double theta, const double delta
 //A2 class test
 void test_heston_A2() {
     // Create scope for Kokkos objects
-    int m1 = 5;
-    int m2 = 5;
+    int m1 = 2;
+    int m2 = 4;
     
     Grid grid = create_test_grid(m1, m2);
     
@@ -420,7 +420,7 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
             
             // Add reaction term to main diagonal
             h_main(i, j) += -0.5 * r_d;
-            /*
+            
             if(grid.Vec_v[j] > 1.0) {
                 // For upwind scheme
                 // Alpha terms
@@ -433,7 +433,7 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
                 h_main(i, j + 1 + 0) += temp2 * delta_v(j-1, 0, grid.Delta_v);      // same as alpha
                 h_upper(i, j + 1 ) += temp2 * delta_v(j-1, 1, grid.Delta_v);     // writes at current position
             }
-            */
+            
             
             if(j == 0) {
                 // v=0 case: uses gamma coefficients
@@ -518,8 +518,8 @@ void heston_A2_shuffled::build_implicit(const double theta, const double delta_t
 
 void test_heston_A2_shuffled() {
     // Test dimensions
-    int m1 = 300;
-    int m2 = 100;
+    int m1 = 2;
+    int m2 = 14;
     Grid grid = create_test_grid(m1, m2);
     
     // Create and build A2 matrix
@@ -557,7 +557,7 @@ void test_heston_A2_shuffled() {
     // Print matrices
     std::cout << "A2 Shuffled Matrix Structure:\n";
     std::cout << "-------------------------\n";
-    /*
+    
     for(int i = 0; i < m1 + 1; i++) {
         std::cout << "\nBlock i=" << i << ":\n";
         // Print all diagonals for this block
@@ -573,7 +573,7 @@ void test_heston_A2_shuffled() {
         for(int j = 0; j < m2-1; j++) std::cout << h_upper2(i,j) << " ";
         std::cout << "\n";
     }
-    */
+    
     // Print dimensions
     std::cout << "\nDimensions:\n";
     std::cout << "m1: " << A2.get_m1() << ", m2: " << A2.get_m2() << "\n";
@@ -1206,6 +1206,108 @@ void test_shuffle_functions() {
               << max_diff << "\n";
 }
 
+void test_A2_implementations() {
+    std::cout << "Testing A2 implementations with small dimensions for verification\n";
+
+    // Small dimensions for easy verification
+    int m1 = 2;  // 3 stock price levels (0 to 2)
+    int m2 = 14;  // 5 variance levels (0 to 4)
+    const int total_size = (m1 + 1) * (m2 + 1);
+    
+    // Create grid using existing helper function
+    Grid grid = create_test_grid(m1, m2);
+    
+    // Parameters (same as Python)
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double kappa = 1.5;
+    double eta = 0.04;
+    
+    // Create both A2 implementations
+    heston_A2Storage_gpu A2(m1, m2);
+    heston_A2_shuffled A2_shuffled(m1, m2);
+    
+    // Build matrices
+    A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuffled.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    
+    // Create test vector [1,2,3,...]
+    Kokkos::View<double*> test_vector("test_vector", total_size);
+    auto h_test_vector = Kokkos::create_mirror_view(test_vector);
+    for(int i = 0; i < total_size; i++) {
+        h_test_vector(i) = i + 1;
+    }
+    Kokkos::deep_copy(test_vector, h_test_vector);
+    
+    // Print original vector
+    std::cout << "\nOriginal test vector:\n";
+    for(int i = 0; i < total_size; i++) {
+        std::cout << h_test_vector(i) << " ";
+    }
+    std::cout << "\n";
+    
+    // Test original A2
+    Kokkos::View<double*> result1("result1", total_size);
+    A2.multiply(test_vector, result1);
+    
+    // Get result1 back to host
+    auto h_result1 = Kokkos::create_mirror_view(result1);
+    Kokkos::deep_copy(h_result1, result1);
+    std::cout << "\nResult using original A2:\n";
+    for(int i = 0; i < total_size; i++) {
+        std::cout << h_result1(i) << " ";
+    }
+    std::cout << "\n";
+    
+    // Test shuffled A2
+    Kokkos::View<double*> shuffled_vector("shuffled_vector", total_size);
+    Kokkos::View<double*> result2_shuffled("result2_shuffled", total_size);
+    Kokkos::View<double*> result2("result2", total_size);
+    
+    // Shuffle test vector
+    shuffle_vector(test_vector, shuffled_vector, m1, m2);
+    
+    // Get shuffled vector to host and print
+    auto h_shuffled = Kokkos::create_mirror_view(shuffled_vector);
+    Kokkos::deep_copy(h_shuffled, shuffled_vector);
+    std::cout << "\nShuffled test vector:\n";
+    for(int i = 0; i < total_size; i++) {
+        std::cout << h_shuffled(i) << " ";
+    }
+    std::cout << "\n";
+    
+    // Multiply with shuffled A2
+    A2_shuffled.multiply(shuffled_vector, result2_shuffled);
+    
+    // Print shuffled result
+    auto h_result2_shuffled = Kokkos::create_mirror_view(result2_shuffled);
+    Kokkos::deep_copy(h_result2_shuffled, result2_shuffled);
+    std::cout << "\nResult using shuffled A2 (before unshuffling):\n";
+    for(int i = 0; i < total_size; i++) {
+        std::cout << h_result2_shuffled(i) << " ";
+    }
+    std::cout << "\n";
+    
+    // Unshuffle result
+    unshuffle_vector(result2_shuffled, result2, m1, m2);
+    
+    // Get final result to host
+    auto h_result2 = Kokkos::create_mirror_view(result2);
+    Kokkos::deep_copy(h_result2, result2);
+    std::cout << "\nResult using shuffled A2 (after unshuffling):\n";
+    for(int i = 0; i < total_size; i++) {
+        std::cout << h_result2(i) << " ";
+    }
+    std::cout << "\n";
+    
+    // Compute max difference
+    double max_diff = 0.0;
+    for(int i = 0; i < total_size; i++) {
+        max_diff = std::max(max_diff, std::abs(h_result1(i) - h_result2(i)));
+    }
+    std::cout << "\nMax difference: " << max_diff << std::endl;
+}
 
 void test_heston_A2_mat(){
     Kokkos::initialize();
@@ -1217,9 +1319,12 @@ void test_heston_A2_mat(){
             //test_heston_A2_shuffled();
 
             //test_shuffle_functions();
+
             //compare_A2_implementations();
-            debug_A2_implementations();
+
+            //debug_A2_implementations();
             //compare_A2_matrices();
+            test_A2_implementations();
 
         }
         catch (std::exception& e) {

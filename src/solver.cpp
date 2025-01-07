@@ -799,11 +799,11 @@ void test_DO_scheme() {
     Kokkos::initialize();
         {
         //test_parallel_tridiagonal2();
-        //test_heston_call();
+        test_heston_call();
         //test_DO_m1_convergence();
         //test_all_convergence();
 
-        compute_option_price_shuffled();
+        //compute_option_price_shuffled();
 
         //has a bug in it, I dont think it is a bug, but rather bad numerics for the A2 matrix
         //we need to account for oszillation. Will produce fourth diagonal at the lower half of 
