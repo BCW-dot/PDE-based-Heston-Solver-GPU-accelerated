@@ -362,8 +362,8 @@ void test_heston_call(){
     const double eta = 0.04;
     
     // Test parameters matching Python version
-    const int m1 = 300;
-    const int m2 = 100;
+    const int m1 = 50;
+    const int m2 = 25;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     const int m = (m1 + 1) * (m2 + 1);
@@ -522,79 +522,85 @@ Shuffled DO scheme tests
 */
 
 // Function to compute European call price using DO scheme with shuffled A2
-void compute_option_price_shuffled() {
-    // Market parameters
-    const double K = 100.0;
-    const double S_0 = 100.0;
-    const double V_0 = 0.04;
-    const double T = 1.0;
-    const double r_d = 0.025;
-    const double r_f = 0.0;
-    const double rho = -0.9;
-    const double sigma = 0.3;
-    const double kappa = 1.5;
-    const double eta = 0.04;
-    
-    // Test parameters matching Python version
-    const int m1 = 300;
-    const int m2 = 100;
-    std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
+void test_heston_call_shuffled() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = K;
+    double V_0 = 0.04;
+    double T = 1.0;
+    double r_d = 0.025;
+    double r_f = 0.0;
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
 
-    const int m = (m1 + 1) * (m2 + 1);
+    int m1 = 300;
+    int m2 = 100;
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 20;
+    double theta = 0.8;
 
-    const int N = 20;
-    const double delta_t = T / N;
-    const double theta = 0.8;
-    std::cout << "Time Dimension: " << N << std::endl;
-    std::cout << "Theta: " << theta << std::endl;
+    // Create grid
+    Grid grid = create_test_grid(m1, m2);
 
-
-    // Create grid and matrices
-    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
-
+    // Initialize matrices
     heston_A0Storage_gpu A0(m1, m2);
     heston_A1Storage_gpu A1(m1, m2);
-    heston_A2_shuffled A2(m1, m2);
+    heston_A2Storage_gpu A2(m1, m2);  // Original A2
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
 
     // Build matrices
     A0.build_matrix(grid, rho, sigma);
     A1.build_matrix(grid, rho, sigma, r_d, r_f);
     A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
 
     // Build boundary conditions
     BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
-    bounds.initialize(Kokkos::View<double*>("Vec_s", m1 + 1));
+    bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), m1 + 1));
 
     // Initial condition
     Kokkos::View<double*> U_0("U_0", m);
-    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    Kokkos::View<double*> U("U", m);
 
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
     for (int j = 0; j <= m2; j++) {
         for (int i = 0; i <= m1; i++) {
-            h_U_0(j*(m1+1) + i) = std::max(grid.Vec_s[i] - K, 0.0);
+            h_U_0(i + j * (m1 + 1)) = std::max(grid.Vec_s[i] - K, 0.0);
         }
     }
     Kokkos::deep_copy(U_0, h_U_0);
 
-    // Solution vector
-    Kokkos::View<double*> U("U", m);
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    A2.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
 
     // Solve using DO scheme
-    //DO_scheme_shuffled(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+    DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2, A2_shuf, bounds, r_f, U);
 
-    // Extract option price at (S_0, V_0)
+    // Get result
     auto h_U = Kokkos::create_mirror_view(U);
     Kokkos::deep_copy(h_U, U);
 
-    // Find indices for S_0 and V_0
+    // Find price at S_0, V_0
+    // Find option price at S_0 and V_0
     int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
     int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
-    
-    double option_price = h_U(index_v*(m1+1) + index_s);
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    // Compare with reference price (from Python/Monte Carlo)
+    const double reference_price = 8.8948693600540167;
     std::cout << std::setprecision(16) << option_price << std::endl;
+    std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
 
     ResultsExporter::exportToCSV("shuffled_heston_do_scheme", grid, U);
-
 }
 
 
@@ -799,11 +805,11 @@ void test_DO_scheme() {
     Kokkos::initialize();
         {
         //test_parallel_tridiagonal2();
-        test_heston_call();
+        //test_heston_call();
         //test_DO_m1_convergence();
         //test_all_convergence();
 
-        //compute_option_price_shuffled();
+        test_heston_call_shuffled();
 
         //has a bug in it, I dont think it is a bug, but rather bad numerics for the A2 matrix
         //we need to account for oszillation. Will produce fourth diagonal at the lower half of 

@@ -420,7 +420,7 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
             
             // Add reaction term to main diagonal
             h_main(i, j) += -0.5 * r_d;
-            
+            /*
             if(grid.Vec_v[j] > 1.0) {
                 // For upwind scheme
                 // Alpha terms
@@ -433,7 +433,7 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
                 h_main(i, j + 1 + 0) += temp2 * delta_v(j-1, 0, grid.Delta_v);      // same as alpha
                 h_upper(i, j + 1 ) += temp2 * delta_v(j-1, 1, grid.Delta_v);     // writes at current position
             }
-            
+            */
             
             if(j == 0) {
                 // v=0 case: uses gamma coefficients
@@ -1320,11 +1320,11 @@ void test_heston_A2_mat(){
 
             //test_shuffle_functions();
 
-            //compare_A2_implementations();
+            compare_A2_implementations();
 
             //debug_A2_implementations();
             //compare_A2_matrices();
-            test_A2_implementations();
+            //test_A2_implementations();
 
         }
         catch (std::exception& e) {

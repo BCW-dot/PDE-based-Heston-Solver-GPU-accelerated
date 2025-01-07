@@ -182,6 +182,106 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
               << " seconds" << std::endl;
 }
 
+template<class ViewType>
+void DO_scheme_shuffle(const int m,                    
+              const int m1,                    // Added for shuffling
+              const int m2,                    // Added for shuffling
+              const int N,                     
+              const ViewType& U_0,             
+              const double delta_t,            
+              const double theta,              
+              heston_A0Storage_gpu& A0,        
+              heston_A1Storage_gpu& A1,        
+              heston_A2Storage_gpu& A2,        // Keep original
+              heston_A2_shuffled& A2_shuf,     // Add shuffled version
+              const BoundaryConditions& bounds,
+              const double r_f,                
+              ViewType& U) {                   
+    
+    // Initialize result with initial condition
+    Kokkos::deep_copy(U, U_0);
+
+    // Create persistent workspace vectors to avoid reallocations
+    ViewType Y_0("Y_0", m);
+    ViewType Y_1("Y_1", m);
+    ViewType A0_result("A0_result", m);
+    ViewType A1_result("A1_result", m);
+    ViewType A2_result("A2_result", m);
+
+    ViewType Y_1_shuffled("Y_1_shuffled", m);
+    ViewType U_next_shuffled("U_next_shuffled", m);
+    
+    // Add shuffled workspace
+    ViewType U_shuffled("U_shuffled", m);
+    ViewType A2_result_shuffled("A2_result_shuffled", m);
+    ViewType A2_result_unshuf("A2_result_unshuf", m);  
+
+    // Get boundary vectors
+    auto b = bounds.get_b();
+    auto b1 = bounds.get_b1();
+    auto b2 = bounds.get_b2();
+
+    using timer = std::chrono::high_resolution_clock;
+    auto t_start = timer::now();
+
+    // Main time stepping loop
+    for (int n = 1; n <= N; n++) {
+        ViewType A0_result("A0_result", m);
+
+        // Step 1: Let's first just verify we get same result with both A2s
+        A0.multiply_parallel_s_and_v(U, A0_result);
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        // Add shuffled A2 multiplication (but don't use result yet)
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        // Use original result for now
+        Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor = std::exp(r_f * delta_t * (n-1));
+            Y_0(i) = U(i) + delta_t * (A0_result(i) + A1_result(i) + A2_result_unshuf(i) + b(i) * exp_factor);
+        });
+
+        // Rest of function exactly as original
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_0(i) + theta * delta_t * (b1(i) * exp_factor - A1_result(i));
+            Y_0(i) = rhs;
+        });
+        
+        A1.solve_implicit_parallel_v(Y_1, Y_0);
+
+        //A2.multiply_parallel_s_and_v(U, A2_result);
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor - A2_result_unshuf(i));
+            Y_1(i) = rhs;
+        });
+
+        //A2.solve_implicit(U, Y_1);
+        // Shuffle input
+        shuffle_vector(Y_1, Y_1_shuffled, m1, m2);
+        
+        // Solve with shuffled A2
+        A2_shuf.solve_implicit(U_next_shuffled, Y_1_shuffled);
+        
+        // Unshuffle result back to U
+        unshuffle_vector(U_next_shuffled, U, m1, m2);
+    }
+
+    auto t_end = timer::now();
+    std::cout << "DO time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+}
+
 
 //First test of a different scheme
 template<class ViewType>
