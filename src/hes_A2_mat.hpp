@@ -511,6 +511,12 @@ inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x,
 }
 
 
+
+
+
+
+
+
 inline void shuffle_vector(const Kokkos::View<double*>& input, 
                          Kokkos::View<double*>& output,
                          const int m1, 

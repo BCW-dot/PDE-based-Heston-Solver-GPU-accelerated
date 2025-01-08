@@ -257,9 +257,9 @@ void DO_scheme_shuffle(const int m,
     }
 
     auto t_end = timer::now();
-    std::cout << "DO time: "
-              << std::chrono::duration<double>(t_end - t_start).count()
-              << " seconds" << std::endl;
+    //std::cout << "DO time: "
+              //<< std::chrono::duration<double>(t_end - t_start).count()
+              //<< " HERE seconds" << std::endl;
 }
 
 
