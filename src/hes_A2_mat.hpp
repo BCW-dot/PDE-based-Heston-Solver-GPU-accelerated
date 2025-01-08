@@ -59,10 +59,10 @@ public:
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_upper2_diag() const { return upper2_diag; }
 
     //for debugging:
-    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_main_diag() const { return main_diag; }
-    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_lower_diag() const { return lower_diag; }
-    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_upper_diag() const { return upper_diag; }
-    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_upper2_diag() const { return upper2_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_main_diag() const { return implicit_main_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_lower_diag() const { return implicit_lower_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_upper_diag() const { return implicit_upper_diag; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_upper2_diag() const { return implicit_upper2_diag; }
 };
 
 /*
@@ -340,11 +340,11 @@ public:
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_upper2_diags() const { return upper2_diags; }
 
     //for debugging
-    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_main_diags() const { return main_diags; }
-    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_lower_diags() const { return lower_diags; }
-    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_lower2_diags() const { return lower2_diags; }
-    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_upper_diags() const { return upper_diags; }
-    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_upper2_diags() const { return upper2_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_main_diags() const { return implicit_main_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_lower_diags() const { return implicit_lower_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_lower2_diags() const { return implicit_lower2_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_upper_diags() const { return implicit_upper_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_upper2_diags() const { return implicit_upper2_diags; }
 };
 
 // Multiply implementation
@@ -417,7 +417,6 @@ inline void heston_A2_shuffled::multiply(const Kokkos::View<double*>& x,
 }
 
 // Pentadiagonal solver implementation
-
 inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x, 
                                              const Kokkos::View<double*>& b) {
     const int local_m1 = m1;
@@ -465,6 +464,7 @@ inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x,
                             local_lower2(i, j-2) * local_d(i, j-2)) / den;
         }
         
+        
         // Last two rows (if they exist)
         if(local_m2 > 2) {
             // Second-to-last row
@@ -509,6 +509,7 @@ inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x,
     });
     Kokkos::fence();
 }
+
 
 inline void shuffle_vector(const Kokkos::View<double*>& input, 
                          Kokkos::View<double*>& output,

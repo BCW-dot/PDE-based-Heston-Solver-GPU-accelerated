@@ -434,7 +434,6 @@ void heston_A2_shuffled::build_matrix(const Grid& grid, double rho, double sigma
                 h_upper(i, j + 1 ) += temp2 * delta_v(j-1, 1, grid.Delta_v);     // writes at current position
             }
             */
-            
             if(j == 0) {
                 // v=0 case: uses gamma coefficients
                 h_main(i, j) += temp * gamma_v(j, 0, grid.Delta_v);
@@ -558,7 +557,7 @@ void test_heston_A2_shuffled() {
     std::cout << "A2 Shuffled Matrix Structure:\n";
     std::cout << "-------------------------\n";
     
-    for(int i = 0; i < m1 + 1; i++) {
+    for(int i = 0; i < 1; i++){//m1 + 1; i++) {
         std::cout << "\nBlock i=" << i << ":\n";
         // Print all diagonals for this block
         std::cout << "Second lower diagonal: ";
@@ -601,7 +600,7 @@ void test_heston_A2_shuffled() {
 
     // Test implicit solve
     using timer = std::chrono::high_resolution_clock;
-    for(int i = 0; i<5; i++){
+    for(int i = 0; i<1; i++){
         auto t_start = timer::now();
         A2.solve_implicit(x, b);
         auto t_end = timer::now();
@@ -613,7 +612,7 @@ void test_heston_A2_shuffled() {
 
     // Verify solution by computing residual
     std::cout << std::endl;
-    for(int i = 0; i<5; i++){
+    for(int i = 0; i<1; i++){
         auto t_start = timer::now();
         A2.multiply(x, result);
         auto t_end = timer::now();
@@ -642,10 +641,334 @@ void test_heston_A2_shuffled() {
 
 /*
 
+penta diagonal solver
+
+*/
+#include <iostream>
+#include <vector>
+#include <stdexcept>
+#include <iomanip>
+#include <cmath>    // For std::abs, std::sqrt
+#include <string>   // For std::to_string>
+
+// Function to extract the five diagonals from a full matrix
+void extract_diagonals(const std::vector<std::vector<double>>& A,
+                      std::vector<double>& E, // Second lower diagonal (size N-2)
+                      std::vector<double>& A_diag, // First lower diagonal (size N-1)
+                      std::vector<double>& D, // Main diagonal (size N)
+                      std::vector<double>& C, // First upper diagonal (size N-1)
+                      std::vector<double>& F) // Second upper diagonal (size N-2)
+{
+    int N = A.size();
+    E.assign(N-2, 0.0);
+    A_diag.assign(N-1, 0.0);
+    D.assign(N, 0.0);
+    C.assign(N-1, 0.0);
+    F.assign(N-2, 0.0);
+    
+    for(int i=0; i<N; ++i)
+    {
+        D[i] = A[i][i];
+        if(i >=1)
+            A_diag[i-1] = A[i][i-1];
+        if(i >=2)
+            E[i-2] = A[i][i-2];
+        if(i <= N-2)
+            C[i] = A[i][i+1];
+        if(i <= N-3)
+            F[i] = A[i][i+2];
+    }
+}
+
+// Pentadiagonal Solver Function
+void solve_penta(int N,
+                std::vector<double> E,    // Second lower diagonal (size N-2)
+                std::vector<double> A_diag,    // First lower diagonal (size N-1)
+                std::vector<double> D,    // Main diagonal (size N)
+                std::vector<double> C,    // First upper diagonal (size N-1)
+                std::vector<double> F,    // Second upper diagonal (size N-2)
+                std::vector<double> B,    // Right-hand side (size N)
+                std::vector<double>& X)   // Solution vector (size N, output)
+{
+    // Copy diagonals to modify them during elimination
+    std::vector<double> E_copy = E;
+    std::vector<double> A_copy = A_diag;
+    std::vector<double> D_copy = D;
+    std::vector<double> C_copy = C;
+    std::vector<double> F_copy = F;
+    std::vector<double> B_copy = B;
+    
+    // Forward Elimination
+    for(int i = 1; i <= N-2; ++i) // Corresponds to rows 2 to N-1 (1-based)
+    {
+        if (std::abs(D_copy[i-1]) < 1e-15)
+        {
+            throw std::runtime_error("Zero pivot encountered at row " + std::to_string(i-1));
+        }
+
+        // Multiplier for first elimination
+        double XMULT = A_copy[i-1] / D_copy[i-1];
+        D_copy[i]     -= XMULT * C_copy[i-1];
+        C_copy[i]     -= XMULT * F_copy[i-1];
+        B_copy[i]     -= XMULT * B_copy[i-1];
+        // Eliminate A_copy[i-1]
+        A_copy[i-1]  = 0.0;
+
+        // Multiplier for second elimination
+        double XMULT2 = E_copy[i-1] / D_copy[i-1];
+        A_copy[i]    -= XMULT2 * C_copy[i-1];
+        D_copy[i+1]  -= XMULT2 * F_copy[i-1];
+        B_copy[i+1]  -= XMULT2 * B_copy[i-1];
+        // Eliminate E_copy[i-1]
+        E_copy[i-1]  = 0.0;
+    }
+
+    // Handle the second-to-last row (i = N-1 in Fortran, i = N-2 in C++)
+    if(N >=2)
+    {
+        int last = N - 2;
+        if (std::abs(D_copy[last]) < 1e-15)
+        {
+            throw std::runtime_error("Zero pivot encountered at row " + std::to_string(last));
+        }
+        double XMULT_last = A_copy[last] / D_copy[last];
+        D_copy[last+1]     -= XMULT_last * C_copy[last];
+        B_copy[last+1]     -= XMULT_last * B_copy[last];
+        // Eliminate A_copy[last]
+        A_copy[last]       = 0.0;
+    }
+
+    // Back Substitution
+    X.assign(N, 0.0);
+    if (std::abs(D_copy[N-1]) < 1e-15)
+    {
+        throw std::runtime_error("Zero pivot encountered at row " + std::to_string(N-1));
+    }
+    X[N-1] = B_copy[N-1] / D_copy[N-1];
+    if (N >=2)
+    {
+        if (std::abs(D_copy[N-2]) < 1e-15)
+        {
+            throw std::runtime_error("Zero pivot encountered at row " + std::to_string(N-2));
+        }
+        X[N-2] = (B_copy[N-2] - C_copy[N-2] * X[N-1]) / D_copy[N-2];
+    }
+
+    for(int j = N - 3; j >=0; --j) // Corresponds to rows N-2 downto 1 (0-based)
+    {
+        if (std::abs(D_copy[j]) < 1e-15)
+        {
+            throw std::runtime_error("Zero pivot encountered at row " + std::to_string(j));
+        }
+        X[j] = (B_copy[j] - C_copy[j] * X[j+1] - F_copy[j] * X[j+2]) / D_copy[j];
+    }
+}
+
+// Function to compute residual norm ||A * X - B||
+double compute_residual_norm(const std::vector<std::vector<double>>& A,
+                            const std::vector<double>& X,
+                            const std::vector<double>& B)
+{
+    int N = A.size();
+    double residual = 0.0;
+    for(int i=0; i<N; ++i)
+    {
+        double Ax = 0.0;
+        for(int j=0; j<A[i].size(); ++j)
+        {
+            Ax += A[i][j] * X[j];
+        }
+        double diff = Ax - B[i];
+        residual += diff * diff;
+    }
+    return std::sqrt(residual);
+}
+
+// Function to print vectors
+void print_vector(const std::vector<double>& vec)
+{
+    std::cout << "[";
+    for(size_t i=0; i<vec.size(); ++i)
+    {
+        std::cout << std::fixed << std::setprecision(8) << vec[i];
+        if(i != vec.size()-1)
+            std::cout << " ";
+    }
+    std::cout << "]\n";
+}
+
+void my_test()
+{
+    std::cout << "Starting various Tests with Kokkos...\n\n";
+
+    // Define test cases
+    struct TestCase {
+    int test_number;
+    std::vector<std::vector<double>> A;
+    std::vector<double> b;
+    std::vector<double> matlab_result;
+};
+
+std::vector<TestCase> test_cases;
+
+// Test 1
+test_cases.push_back(TestCase{
+    1,
+    {
+        {15, -2, -6,  0},
+        {-2, 12, -4, -4},
+        {-6, -4, 19, -9},
+        { 0, -1, -9, 21}
+    },
+    {300, 0, 0, 0},
+    {27.16548702392990, 11.42568250758342, 14.10515672396360, 6.58914728682170}
+});
+
+// Test 2
+test_cases.push_back(TestCase{
+    2,
+    {
+        {15,  8, -6,  0,  0,  0},
+        {-2, 12, -4, -4,  0,  0},
+        {-6, -4, 19, -9,  4,  0},
+        { 0, -1, -9, 21,  6,  7},
+        { 0,  0,  9, 10, 11,  8},
+        { 0,  0,  0, 10, -2,  2}
+    },
+    {300, 0, 0, 0, 1, 2},
+    {14.783336170627, 22.913057224154, 17.509083392106, 43.838420195044, 60.556360806440, -157.635740168778}
+});
+
+// Test 3
+test_cases.push_back(TestCase{
+    3,
+    {
+        {15,  8, -6,  0,  0,  0,  0},
+        {-2, 12, -4, -4,  0,  0,  0},
+        {-6, -4, 19, -9,  4,  0,  0},
+        { 0, -1, -9, 21,  6,  7,  0},
+        { 0,  0,  9, 10, 11,  8,  3},
+        { 0,  0,  0, 10, -2,  2,  4},
+        { 0,  0,  0,  0, -2,  2,  4}
+    },
+    {300, 0, 0, 0, 1, 2, 6},
+    {22.60711151041847, 10.45280071875325, 20.45484640105050, -0.40000000000000, -53.69705242060892, 75.01839040740875, -62.85772141400877}
+});
+
+// Test 4
+test_cases.push_back(TestCase{
+    4,
+    {
+        {15, 8},
+        {0, 12}
+    },
+    {300, 0},
+    {20, 0}
+});
+
+// Test 5
+test_cases.push_back(TestCase{
+    5,
+    {
+        {15,  8, -6,  0,  0,  0,  0,  0},
+        {-2, 12, -4, -4,  0,  0,  0,  0},
+        {-6, -4, 19, -9,  4,  0,  0,  0},
+        { 0, -1, -9, 21,  6,  7,  0,  0},
+        { 0,  0,  9, 10, 11,  8,  3,  0},
+        { 0,  0,  0, 10, -2,  2,  4,  3},
+        { 0,  0,  0,  0, -2,  2,  4,  7},
+        { 0,  0,  0,  0,  0,  4,  8,  9}
+    },
+    {300, 0, 0, 0, 1, 2, 6, 10},
+    {13.29391368, 13.24743591, 0.89803211, 32.19731879, 101.36662123, -180.43052817, -0.21469502, 81.49329698}
+});
+
+
+    // Iterate over test cases
+    for(auto& test : test_cases)
+    {
+        std::cout << "===========>test " << test.test_number << "\n";
+        std::cout << "A = \n";
+        for(auto& row : test.A)
+        {
+            for(auto& elem : row)
+                std::cout << std::setw(6) << elem << " ";
+            std::cout << "\n";
+        }
+        std::cout << "b = \n";
+        std::cout << "[";
+        for(size_t i=0; i<test.b.size(); ++i)
+        {
+            std::cout << test.b[i];
+            if(i != test.b.size()-1)
+                std::cout << " ";
+        }
+        std::cout << "]\n";
+
+        // Extract diagonals
+        std::vector<double> E, A_diag, D, C, F;
+        extract_diagonals(test.A, E, A_diag, D, C, F);
+
+        // Solve the pentadiagonal system
+        std::vector<double> X;
+        try
+        {
+            solve_penta(test.A.size(), E, A_diag, D, C, F, test.b, X);
+        }
+        catch(const std::runtime_error& e)
+        {
+            std::cerr << "Solver error: " << e.what() << "\n";
+            continue;
+        }
+
+        // Print our result
+        std::cout << "=======>our result\n";
+        print_vector(X);
+
+        // Compute MATLAB's expected result
+        std::cout << "=======>Matlab result\n";
+        std::cout << "[";
+        for(size_t i=0; i<test.matlab_result.size(); ++i)
+        {
+            std::cout << std::fixed << std::setprecision(14) << test.matlab_result[i];
+            if(i != test.matlab_result.size()-1)
+                std::cout << " ";
+        }
+        std::cout << "]\n";
+
+        // Compute residual norm
+        // To compute residual, reconstruct full A matrix
+        std::vector<std::vector<double>> A_full = test.A;
+        double residual_norm = compute_residual_norm(A_full, X, test.b);
+        std::cout << "\nResidual norm: " << residual_norm << "\n";
+
+        // Compare with MATLAB result (optional)
+        // Here, we can compute the difference between our X and MATLAB's
+        std::cout << "Difference between our result and Matlab result:\n[";
+        double max_diff = 0.0;
+        for(size_t i=0; i<X.size(); ++i)
+        {
+            double diff = std::abs(X[i] - test.matlab_result[i]);
+            std::cout << std::fixed << std::setprecision(8) << diff << " ";
+            if(diff > max_diff)
+                max_diff = diff;
+        }
+        std::cout << "]\n";
+        std::cout << "Maximum difference: " << max_diff << "\n";
+
+        std::cout << "\n";
+    }
+
+    std::cout << "Tests have completed successfully.\n";
+}
+
+
+
+/*
+
 making sure shuffle and the original A2 matrix perfom the same computations
 
 */
-
 // Helper functions for shuffling
 inline void shuffle_vector(const Kokkos::View<double*>& input, 
                          Kokkos::View<double*>& output,
@@ -1320,7 +1643,7 @@ void test_heston_A2_mat(){
 
             //test_shuffle_functions();
 
-            compare_A2_implementations();
+            //compare_A2_implementations();
 
             //debug_A2_implementations();
             //compare_A2_matrices();
@@ -1332,4 +1655,6 @@ void test_heston_A2_mat(){
         }
     } // All test objects destroyed here
     Kokkos::finalize();
+
+    my_test();
 }

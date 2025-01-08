@@ -1572,7 +1572,7 @@ void test_hes_mat_fac() {
         try {
             std::cout << "Default execution space: " << Kokkos::DefaultExecutionSpace::name() << std::endl;
 
-            //test_heston_A0();
+            test_heston_A0();
             //test_heston_A1();
             //test_heston_A2();
             
@@ -1585,7 +1585,7 @@ void test_hes_mat_fac() {
             //test_A1_multiply_and_implicit_coalesc();
 
             //test_heston_A1_flat();
-            test_A1_flat_performance();
+            //test_A1_flat_performance();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;

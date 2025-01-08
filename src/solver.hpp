@@ -116,26 +116,7 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
     auto t_start = timer::now();
     // Main time stepping loop
     for (int n = 1; n <= N; n++) {
-        // Temporary arrays for F computations
-        /*
-        //ViewType temp_a0("temp_a0", m);
-        //ViewType temp_a1("temp_a1", m);
-        //ViewType temp_a2("temp_a2", m);
-
-        // Step 1: Combined computation of Y_0 = U + dt * (A0*U + A1*U + A2*U + b*exp(r_f*dt*(n-1)))
-        A0.multiply_seq(U, temp_a0);
-        A1.multiply(U, temp_a1);
-        A2.multiply(U, temp_a2);
-        
-        Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor = std::exp(r_f * delta_t * (n-1));
-            Y_0(i) = U(i) + delta_t * (temp_a0(i) + temp_a1(i) + temp_a2(i) + b(i) * exp_factor);
-        });
-        */
-
         ViewType A0_result("A0_result", m);
-        //ViewType A1_result("A1_result", m);
-        //ViewType A2_result("A2_result", m);
 
         //A0.multiply_seq(U, A0_result);
         A0.multiply_parallel_s_and_v(U, A0_result);
@@ -172,7 +153,6 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
         });
 
         A2.solve_implicit(U, Y_1);  // Y_1 contains RHS, result in U
-        //std::this_thread::sleep_for(std::chrono::duration<double>(0.0005));
     }
 
     auto t_end = timer::now();
