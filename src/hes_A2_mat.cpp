@@ -1201,7 +1201,8 @@ void my_test()
 }
 */
 
-
+//also works, more simplefied
+/*
 #include <iostream>
 #include <vector>
 #include <stdexcept>
@@ -1384,15 +1385,6 @@ void test_penta_solver()
             std::vector<double> X;  // Solution vector
             solve_penta(N, E, A_diag, D, C, F, B, X);
             
-            // Print solution
-            /*
-            std::cout << "Solution vector x = [";
-            for (int i = 0; i < N; i++) {
-                std::cout << std::fixed << std::setprecision(8) << X[i];
-                if (i < N-1) std::cout << ", ";
-            }
-            std::cout << "]\n";
-            */
             
             // Compute and print residual
             double residual = compute_residual(N, E, A_diag, D, C, F, B, X);
@@ -1407,8 +1399,165 @@ void test_penta_solver()
 void my_test()
 {
     test_penta_solver();
-    
 }
+*/
+
+/*
+
+Zhis is my own oenta diagonal solver and it works!!!
+
+*/
+#include <random>
+// Function to calculate the residual of the pentadiagonal system
+double calculate_residual(
+    const std::vector<double>& lower2,
+    const std::vector<double>& lower,
+    const std::vector<double>& main,
+    const std::vector<double>& upper,
+    const std::vector<double>& upper2,
+    const std::vector<double>& d,
+    const std::vector<double>& x) {
+    
+    const int N = main.size();
+    double max_residual = 0.0;
+    
+    // Check first row (only has main, upper1, upper2)
+    double res = main[0] * x[0] + upper[0] * x[1] + upper2[0] * x[2] - d[0];
+    max_residual = std::abs(res);
+    
+    // Check second row (has lower1, main, upper1, upper2)
+    res = lower[0] * x[0] + main[1] * x[1] + upper[1] * x[2];
+    if (N > 3) res += upper2[1] * x[3];
+    res -= d[1];
+    max_residual = std::max(max_residual, std::abs(res));
+    
+    // Middle rows (have all five diagonals)
+    for (int i = 2; i < N-2; i++) {
+        res = lower2[i-2] * x[i-2] + lower[i-1] * x[i-1] + main[i] * x[i] +
+              upper[i] * x[i+1] + upper2[i] * x[i+2] - d[i];
+        max_residual = std::max(max_residual, std::abs(res));
+    }
+    
+    // Second to last row (if exists)
+    if (N > 3) {
+        res = lower2[N-4] * x[N-4] + lower[N-3] * x[N-3] + main[N-2] * x[N-2] +
+              upper[N-2] * x[N-1] - d[N-2];
+        max_residual = std::max(max_residual, std::abs(res));
+    }
+    
+    // Last row (if exists)
+    if (N > 2) {
+        res = lower2[N-3] * x[N-3] + lower[N-2] * x[N-2] + main[N-1] * x[N-1] - d[N-1];
+        max_residual = std::max(max_residual, std::abs(res));
+    }
+    
+    return max_residual;
+}
+
+void penta_diagonal_solver(
+    const std::vector<double>& lower2,  // Second lower diagonal (l2)
+    const std::vector<double>& lower,   // First lower diagonal (l1)
+    const std::vector<double>& main,    // Main diagonal
+    const std::vector<double>& upper,   // First upper diagonal (u1)
+    const std::vector<double>& upper2,  // Second upper diagonal (u2)
+    const std::vector<double>& d,       // Right-hand side vector
+    std::vector<double>& x) {          // Solution vector
+    
+    const int N = main.size();
+    
+    // Temporary arrays for modified coefficients
+    std::vector<double> c2_star(N, 0.0);  // Modified second upper diagonal
+    std::vector<double> c1_star(N, 0.0);  // Modified first upper diagonal
+    std::vector<double> d_star(N, 0.0);   // Modified right-hand side
+    
+    // Initialize first row
+    c1_star[0] = upper[0] / main[0];
+    c2_star[0] = upper2[0] / main[0];
+    d_star[0] = d[0] / main[0];
+    
+    // Initialize second row
+    double m1 = 1.0 / (main[1] - lower[0] * c1_star[0]);
+    c1_star[1] = (upper[1] - lower[0] * c2_star[0]) * m1;
+    c2_star[1] = upper2[1] * m1;
+    d_star[1] = (d[1] - lower[0] * d_star[0]) * m1;
+    
+    // Forward sweep
+    for (int i = 2; i < N; i++) {
+        // Compute multiplier for current row
+        //double den = main[i] - lower[i-1] * c1_star[i-1] - lower2[i-2] * c1_star[i-2];
+        double den = main[i] - (lower[i-1]-lower2[i-2]*c1_star[i-2]) * c1_star[i-1] - lower2[i-2] * c2_star[i-2];
+        double m = 1.0 / den;
+        
+        // Update modified upper diagonals
+        //c1_star[i] = (upper[i] - lower[i-1] * c2_star[i-1]) * m;
+        c1_star[i] = (upper[i] - (lower[i-1]-lower2[i-2]*c1_star[i-2]) * c2_star[i-1]) * m;
+        c2_star[i] = upper2[i] * m;
+        
+        // Update modified right-hand side
+        //d_star[i] = (d[i] - lower[i-1] * d_star[i-1] - lower2[i-2] * d_star[i-2]) * m;
+        d_star[i] = (d[i] - (lower[i-1]-lower2[i-2]*c1_star[i-2]) * d_star[i-1] - lower2[i-2] * d_star[i-2]) * m;
+    }
+    
+    // Back substitution
+    x[N-1] = d_star[N-1];
+    x[N-2] = d_star[N-2] - c1_star[N-2] * x[N-1];
+    
+    for (int i = N-3; i >= 0; i--) {
+        x[i] = d_star[i] - c1_star[i] * x[i+1] - c2_star[i] * x[i+2];
+    }
+}
+
+// Example usage:
+void my_test(){
+    const int N = 100;
+    
+    // Create a test system with known solution
+    std::vector<double> lower2(N-2, -1.0);  // Second lower diagonal
+    std::vector<double> lower(N-1, -1.0);   // First lower diagonal
+    std::vector<double> main(N, 4.0);       // Main diagonal
+    std::vector<double> upper(N-1, -1.0);   // First upper diagonal
+    std::vector<double> upper2(N-2, -1.0);  // Second upper diagonal
+    
+    // Create right-hand side for a known solution (all ones)
+    std::vector<double> x_exact(N, 1.0);    // Exact solution (all ones)
+    
+    // Create random right-hand side vector
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(-10.0, 10.0);  // Random values between -10 and 10
+    
+    std::vector<double> d(N);
+    for (int i = 0; i < N; i++) {
+        d[i] = dis(gen);
+    }
+    
+    // Solve the system
+    std::vector<double> x(N, 0.0);          // Solution vector
+    penta_diagonal_solver(lower2, lower, main, upper, upper2, d, x);
+    
+    // Calculate and print the residual
+    double residual = calculate_residual(lower2, lower, main, upper, upper2, d, x);
+    
+    // Print solution and error metrics
+    
+    std::cout << "\nError metrics:" << std::endl;
+    std::cout << "Residual: " << residual << std::endl;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
