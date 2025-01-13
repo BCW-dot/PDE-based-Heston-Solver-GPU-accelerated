@@ -124,7 +124,8 @@ public:
             Kokkos::deep_copy(U_0, h_U_0);
 
             // Run solver
-            DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            //DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
 
             // Get price
             auto h_U = Kokkos::create_mirror_view(U);
@@ -212,7 +213,9 @@ public:
             // Start timing
             auto start = std::chrono::high_resolution_clock::now();
 
-            DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            //DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+
 
             // Record time
             auto end = std::chrono::high_resolution_clock::now();
@@ -291,7 +294,9 @@ public:
             Kokkos::deep_copy(U_0, h_U_0);
 
             auto start = std::chrono::high_resolution_clock::now();
-            DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            //DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> duration = end - start;
 
@@ -788,10 +793,10 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 50;
-    int m2 = 25;
+    int m1 = 300;
+    int m2 = 100;
     int m = (m1 + 1) * (m2 + 1);
-    int N = 20;
+    int N = 30;
     double theta = 0.8;
 
     // Create grid
@@ -836,9 +841,9 @@ void test_heston_call_shuffled() {
     A2_shuf.build_implicit(theta, delta_t);
 
     // Solve using DO scheme
-    for( int i = 0; i<5; i++){
+    //for( int i = 0; i<5; i++){
         DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2, A2_shuf, bounds, r_f, U);
-    }
+    //}
 
     // Get result
     auto h_U = Kokkos::create_mirror_view(U);
@@ -853,6 +858,7 @@ void test_heston_call_shuffled() {
     // Compare with reference price (from Python/Monte Carlo)
     const double reference_price = 8.8948693600540167;
     std::cout << std::setprecision(16) << option_price << std::endl;
+    std::cout << "Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
     std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
 
     ResultsExporter::exportToCSV("shuffled_heston_do_scheme", grid, U);
@@ -1104,7 +1110,7 @@ void test_CS_scheme_call(){
     //EXPECT_NEAR(option_price, reference_price, 0.1);
     ResultsExporter::exportToCSV("heston_cs_scheme", grid, U);
 }
-/*
+
 void test_CS_convergence() {
     // Market parameters
     const double K = 100.0;
@@ -1146,8 +1152,6 @@ void test_CS_convergence() {
     );
     ConvergenceExporter::exportTimeStepConvergenceToCSV("cs_scheme_N", data_N);
 }
-*/
-
 
 void test_CS_shuffled() {
     // Test parameters
@@ -1162,8 +1166,8 @@ void test_CS_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 50;
-    int m2 = 25;
+    int m1 = 300;
+    int m2 = 100;
     int m = (m1 + 1) * (m2 + 1);
     int N = 20;
     double theta = 0.8;
@@ -1221,11 +1225,14 @@ void test_CS_shuffled() {
 
     // Compare with reference price (from Python/Monte Carlo)
     const double reference_price = 8.8948693600540167;
-    std::cout << "CS_scheme price: " << std::setprecision(6) << option_price << std::endl;
+    std::cout << "CS_scheme price: " << std::setprecision(12) << option_price << std::endl;
     std::cout << "CS_ scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
     //EXPECT_NEAR(option_price, reference_price, 0.1);
     ResultsExporter::exportToCSV("shuffled_heston_cs_scheme", grid, U);
 }
+
+
+
 
 
 void test_parallel_tridiagonal2() {
@@ -1299,13 +1306,13 @@ void test_DO_scheme() {
 
         //test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
-        test_shuffled_convergence();
+        //test_shuffled_convergence();
 
         //has a bug in it, I dont think it is a bug, but rather bad numerics for the A2 matrix
         //we need to account for oszillation. Will produce fourth diagonal at the lower half of 
         //the matrix
         //test_CS_scheme_call();
-        //test_CS_convergence();
+        test_CS_convergence();
         //test_CS_shuffled();
 
         } // All test objects destroyed here

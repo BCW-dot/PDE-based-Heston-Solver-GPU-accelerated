@@ -240,7 +240,6 @@ void DO_scheme_shuffle(const int m,
         A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
         unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
         
-        // Use original result for now
         Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor = std::exp(r_f * delta_t * (n-1));
             Y_0(i) = U(i) + delta_t * (A0_result(i) + A1_result(i) + A2_result_unshuf(i) + b(i) * exp_factor);
@@ -282,9 +281,9 @@ void DO_scheme_shuffle(const int m,
     }
 
     auto t_end = timer::now();
-    //std::cout << "DO time: "
-              //<< std::chrono::duration<double>(t_end - t_start).count()
-              //<< " HERE seconds" << std::endl;
+    std::cout << "DO time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
 }
 
 
@@ -347,7 +346,10 @@ void CS_scheme(const int m,                    // Total size (m1+1)*(m2+1)
         VectorOps::axpy(Y_1, theta * delta_t, temp, rhs_2);
         A2.solve_implicit(Y_2, rhs_2);
 
+        //Here is a mistake. We need to zero out first when using A0, since there is a bug in the 
+        //explicict implementation
         // Step 4: Compute Y_0_tilde with corrector term for A0
+        ViewType temp("temp", m);
         FFunctions::F_0(n, Y_2, A0, b0, r_f, delta_t, temp);
         ViewType temp_prev("temp_prev", m);
         FFunctions::F_0(n-1, U, A0, b0, r_f, delta_t, temp_prev);
@@ -441,8 +443,9 @@ void CS_scheme_shuffled(const int m,
         A1.multiply_parallel_s_and_v(U, A1_result);
         
         Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor = std::exp(r_f * delta_t * n);
-            double rhs = Y_0(i) + theta * delta_t * (b1(i) * exp_factor - A1_result(i));
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_0(i) + theta * delta_t * (b1(i) * exp_factor_n - (A1_result(i) + b1(i) * exp_factor_nm1));
             Y_0(i) = rhs;  // Reuse Y_0 to store RHS
         });
         
@@ -455,8 +458,9 @@ void CS_scheme_shuffled(const int m,
         unshuffle_vector(A2_result_shuffled, A2_result, m1, m2);
         
         Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor = std::exp(r_f * delta_t * n);
-            double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor - A2_result(i));
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_n - (A2_result(i) + b2(i) * exp_factor_nm1));
             Y_1(i) = rhs;  // Reuse Y_1 to store RHS
         });
 
@@ -465,14 +469,16 @@ void CS_scheme_shuffled(const int m,
         unshuffle_vector(Y_2_shuffled, Y_2, m1, m2);
 
         // Step 4: Compute Y_0_tilde with corrector term for A0
-        A0.multiply_parallel_s_and_v(Y_2, A0_result);  // F_0(n, Y_2)
+        ViewType A0_result_("A0_result_", m);
+        ViewType A1_result("A1_result", m);
+        A0.multiply_parallel_s_and_v(Y_2, A0_result_);  // F_0(n, Y_2)
         A0.multiply_parallel_s_and_v(U, A1_result);    // F_0(n-1, U) (reusing A1_result as temp)
         
         Kokkos::parallel_for("Y0_tilde_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
             double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
             Y_0_tilde(i) = Y_0(i) + 0.5 * delta_t * (
-                (A0_result(i) + b0(i) * exp_factor_n) -
+                (A0_result_(i) + b0(i) * exp_factor_n) -
                 (A1_result(i) + b0(i) * exp_factor_nm1)
             );
         });
@@ -481,8 +487,9 @@ void CS_scheme_shuffled(const int m,
         A1.multiply_parallel_s_and_v(U, A1_result);
         
         Kokkos::parallel_for("A1_final_rhs", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor = std::exp(r_f * delta_t * n);
-            double rhs = Y_0_tilde(i) + theta * delta_t * (b1(i) * exp_factor - A1_result(i));
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_0_tilde(i) + theta * delta_t * (b1(i) * exp_factor_n - (A1_result(i) + b1(i) * exp_factor_nm1));
             Y_0_tilde(i) = rhs;  // Reuse Y_0_tilde for RHS
         });
         
@@ -494,8 +501,9 @@ void CS_scheme_shuffled(const int m,
         unshuffle_vector(A2_result_shuffled, A2_result, m1, m2);
         
         Kokkos::parallel_for("A2_final_rhs", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor = std::exp(r_f * delta_t * n);
-            double rhs = Y_1_tilde(i) + theta * delta_t * (b2(i) * exp_factor - A2_result(i));
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_1_tilde(i) + theta * delta_t * (b2(i) * exp_factor_n - (A2_result(i) + b2(i) * exp_factor_nm1));
             Y_1_tilde(i) = rhs;  // Reuse Y_1_tilde for RHS
         });
 
