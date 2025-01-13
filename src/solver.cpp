@@ -793,10 +793,10 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 300;
-    int m2 = 100;
+    int m1 = 100;
+    int m2 = 50;
     int m = (m1 + 1) * (m2 + 1);
-    int N = 30;
+    int N = 20;
     double theta = 0.8;
 
     // Create grid
@@ -1025,7 +1025,7 @@ CS scheme tests
 */
 
 void test_CS_scheme_call(){
-    using timer = std::chrono::high_resolution_clock;
+    //using timer = std::chrono::high_resolution_clock;
     // Market parameters
     const double K = 100.0;
     const double S_0 = 100.0;
@@ -1039,13 +1039,13 @@ void test_CS_scheme_call(){
     const double eta = 0.04;
     
     // Test parameters matching Python version
-    const int m1 = 300;
-    const int m2 = 50;
+    const int m1 = 200;
+    const int m2 = 100;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     const int m = (m1 + 1) * (m2 + 1);
 
-    const int N = 70;
+    const int N = 40;
     const double delta_t = T / N;
     const double theta = 0.8;
     std::cout << "Time Dimension: " << N << std::endl;
@@ -1086,13 +1086,13 @@ void test_CS_scheme_call(){
     Kokkos::deep_copy(U_0, h_U_0);
 
     // Run solver
-    auto t_start = timer::now();
+    //auto t_start = timer::now();
     CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-    auto t_end = timer::now();
+    //auto t_end = timer::now();
 
-    std::cout << "CS time: "
-            << std::chrono::duration<double>(t_end - t_start).count()
-            << " seconds" << std::endl;
+    //std::cout << "CS time: "
+            //<< std::chrono::duration<double>(t_end - t_start).count()
+            //<< " seconds" << std::endl;
 
     // Verify solution
     auto h_U = Kokkos::create_mirror_view(U);
@@ -1105,7 +1105,7 @@ void test_CS_scheme_call(){
 
     // Compare with reference price (from Python/Monte Carlo)
     const double reference_price = 8.8948693600540167;
-    std::cout << "CS_scheme price: " << std::setprecision(6) << option_price << std::endl;
+    std::cout << "CS_scheme price: " << std::setprecision(12) << option_price << std::endl;
     std::cout << "CS_ scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
     //EXPECT_NEAR(option_price, reference_price, 0.1);
     ResultsExporter::exportToCSV("heston_cs_scheme", grid, U);
@@ -1166,14 +1166,22 @@ void test_CS_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 300;
-    int m2 = 100;
-    int m = (m1 + 1) * (m2 + 1);
-    int N = 20;
-    double theta = 0.8;
+    // Test parameters matching Python version
+    const int m1 = 200;
+    const int m2 = 100;
+    std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
+
+    const int m = (m1 + 1) * (m2 + 1);
+
+    const int N = 40;
+    const double delta_t = T / N;
+    const double theta = 0.8;
+    std::cout << "Time Dimension: " << N << std::endl;
+    std::cout << "Theta: " << theta << std::endl;
 
     // Create grid
-    Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
 
     // Initialize matrices
     heston_A0Storage_gpu A0(m1, m2);
@@ -1184,19 +1192,15 @@ void test_CS_shuffled() {
     A0.build_matrix(grid, rho, sigma);
     A1.build_matrix(grid, rho, sigma, r_d, r_f);
     A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-
-    // Time step size
-    double delta_t = T / N;
     
     // Build implicit systems
     A1.build_implicit(theta, delta_t);
     A2_shuf.build_implicit(theta, delta_t);
 
    
-
     // Create boundary conditions
     BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
-    bounds.initialize(Kokkos::View<double*>("Vec_s", m1 + 1));
+    bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
 
     // Create initial condition and result vectors
     Kokkos::View<double*> U_0("U_0", m);
@@ -1226,7 +1230,7 @@ void test_CS_shuffled() {
     // Compare with reference price (from Python/Monte Carlo)
     const double reference_price = 8.8948693600540167;
     std::cout << "CS_scheme price: " << std::setprecision(12) << option_price << std::endl;
-    std::cout << "CS_ scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+    std::cout << "CS_scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
     //EXPECT_NEAR(option_price, reference_price, 0.1);
     ResultsExporter::exportToCSV("shuffled_heston_cs_scheme", grid, U);
 }
@@ -1312,8 +1316,8 @@ void test_DO_scheme() {
         //we need to account for oszillation. Will produce fourth diagonal at the lower half of 
         //the matrix
         //test_CS_scheme_call();
-        test_CS_convergence();
-        //test_CS_shuffled();
+        //test_CS_convergence();
+        test_CS_shuffled();
 
         } // All test objects destroyed here
     Kokkos::finalize();

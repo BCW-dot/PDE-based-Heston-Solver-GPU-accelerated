@@ -288,6 +288,9 @@ void DO_scheme_shuffle(const int m,
 
 
 //First test of a different scheme
+//The CS perfoms one more corrector step with the A0 matrix after the first two implicit sweeps
+//then we perfom another implicit sweep. This results in a hiugher accuracy
+/*
 template<class ViewType>
 void CS_scheme(const int m,                    // Total size (m1+1)*(m2+1)
               const int N,                     // Number of time steps
@@ -373,6 +376,111 @@ void CS_scheme(const int m,                    // Total size (m1+1)*(m2+1)
         A2.solve_implicit(U, rhs_2);
     }
 }
+*/
+
+template<class ViewType>
+void CS_scheme(const int m,                    // Total size (m1+1)*(m2+1)
+              const int N,                     // Number of time steps
+              const ViewType& U_0,             // Initial condition
+              const double delta_t,            // Time step size
+              const double theta,              // Weight parameter
+              heston_A0Storage_gpu& A0,        // A0 matrix
+              heston_A1Storage_gpu& A1,        // A1 matrix 
+              heston_A2Storage_gpu& A2,        // A2 matrix
+              const BoundaryConditions& bounds,// Boundary conditions
+              const double r_f,                // Foreign interest rate
+              ViewType& U) {                   // Result vector
+    
+    // Initialize result with initial condition
+    Kokkos::deep_copy(U, U_0);
+
+    // Create persistent workspace vectors to avoid reallocations
+    ViewType Y_0("Y_0", m);
+    ViewType Y_1("Y_1", m);
+    ViewType Y_2("Y_2", m);
+    ViewType Y_0_tilde("Y_0_tilde", m);
+    ViewType Y_1_tilde("Y_1_tilde", m);
+
+    ViewType A0_result("A0_result", m);
+    ViewType A1_result("A1_result", m);
+    ViewType A2_result("A2_result", m);
+    ViewType A0_Y2_result("A0_Y2_result", m);
+    
+    // Get boundary vectors
+    auto b = bounds.get_b();
+    auto b0 = bounds.get_b0();
+    auto b1 = bounds.get_b1();
+    auto b2 = bounds.get_b2();
+
+    using timer = std::chrono::high_resolution_clock;
+    auto t_start = timer::now();
+
+    // Main time stepping loop
+    for (int n = 1; n <= N; n++) {
+        // Step 1: Calculate Y_0
+        ViewType A0_result("A0_result", m);
+        A0.multiply_parallel_s_and_v(U, A0_result);
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        A2.multiply_parallel_s_and_v(U, A2_result);
+        
+        Kokkos::deep_copy(Y_0, U);  // Y_0 starts as U
+        Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor = std::exp(r_f * delta_t * (n-1));
+            Y_0(i) += delta_t * (A0_result(i) + A1_result(i) + A2_result(i) + b(i) * exp_factor);
+        });
+
+        // Step 2: First Y_1 solve
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        Kokkos::parallel_for("First_Y1_rhs", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
+            Y_1(i) = Y_0(i) + theta * delta_t * (b1(i) * exp_factor_now - (A1_result(i) + b1(i) * exp_factor_prev));
+        });
+        A1.solve_implicit_parallel_v(Y_1, Y_1);
+
+        // Step 3: Y_2 solve
+        A2.multiply_parallel_s_and_v(U, A2_result);
+        Kokkos::parallel_for("Y2_rhs", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
+            Y_2(i) = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_now - (A2_result(i) + b2(i) * exp_factor_prev));
+        });
+        A2.solve_implicit(Y_2, Y_2);
+
+        // Step 4: Calculate Y_0_tilde with the corrector term
+        ViewType A0_Y2_result("A0_Y2_result", m);
+        A0.multiply_parallel_s_and_v(Y_2, A0_Y2_result);
+        Kokkos::parallel_for("Y0_tilde", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
+            Y_0_tilde(i) = Y_0(i) + 0.5 * delta_t * (
+                (A0_Y2_result(i) + b0(i) * exp_factor_now) - 
+                (A0_result(i) + b0(i) * exp_factor_prev)
+            );
+        });
+
+        // Step 5: Second Y_1 solve
+        Kokkos::parallel_for("Second_Y1_rhs", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
+            Y_1_tilde(i) = Y_0_tilde(i) + theta * delta_t * (b1(i) * exp_factor_now - (A1_result(i) + b1(i) * exp_factor_prev));
+        });
+        A1.solve_implicit_parallel_v(Y_1_tilde, Y_1_tilde);
+
+        // Step 6: Final solve for U
+        Kokkos::parallel_for("Final_U_rhs", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
+            U(i) = Y_1_tilde(i) + theta * delta_t * (b2(i) * exp_factor_now - (A2_result(i) + b2(i) * exp_factor_prev));
+        });
+        A2.solve_implicit(U, U);
+    }
+
+    auto t_end = timer::now();
+    std::cout << "CS time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+}
 
 template<class ViewType>
 void CS_scheme_shuffled(const int m,                    
@@ -412,6 +520,8 @@ void CS_scheme_shuffled(const int m,
     ViewType A2_result("A2_result", m);
     ViewType A2_result_shuffled("A2_result_shuffled", m);
 
+    ViewType A0_Y2_result("A0_Y2_result", m);
+
     // Get boundary vectors
     auto b = bounds.get_b();
     auto b0 = bounds.get_b0();
@@ -441,15 +551,12 @@ void CS_scheme_shuffled(const int m,
 
         // Step 2: Compute rhs_1 and solve for Y_1
         A1.multiply_parallel_s_and_v(U, A1_result);
-        
-        Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor_n = std::exp(r_f * delta_t * n);
-            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
-            double rhs = Y_0(i) + theta * delta_t * (b1(i) * exp_factor_n - (A1_result(i) + b1(i) * exp_factor_nm1));
-            Y_0(i) = rhs;  // Reuse Y_0 to store RHS
+        Kokkos::parallel_for("First_Y1_rhs", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
+            Y_1(i) = Y_0(i) + theta * delta_t * (b1(i) * exp_factor_now - (A1_result(i) + b1(i) * exp_factor_prev));
         });
-        
-        A1.solve_implicit_parallel_v(Y_1, Y_0);
+        A1.solve_implicit_parallel_v(Y_1, Y_1);
 
         // Step 3: Compute rhs_2 and solve for Y_2
         // Use shuffled A2 multiply
@@ -457,57 +564,44 @@ void CS_scheme_shuffled(const int m,
         A2_shuf.multiply(U_shuffled, A2_result_shuffled);
         unshuffle_vector(A2_result_shuffled, A2_result, m1, m2);
         
-        Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor_n = std::exp(r_f * delta_t * n);
-            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
-            double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_n - (A2_result(i) + b2(i) * exp_factor_nm1));
-            Y_1(i) = rhs;  // Reuse Y_1 to store RHS
+        Kokkos::parallel_for("Y2_rhs", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
+            Y_2(i) = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_now - (A2_result(i) + b2(i) * exp_factor_prev));
         });
 
-        shuffle_vector(Y_1, Y_1_shuffled, m1, m2);
-        A2_shuf.solve_implicit(Y_2_shuffled, Y_1_shuffled);
+        shuffle_vector(Y_2, Y_2_shuffled, m1, m2);
+        A2_shuf.solve_implicit(Y_2_shuffled, Y_2_shuffled);
         unshuffle_vector(Y_2_shuffled, Y_2, m1, m2);
 
-        // Step 4: Compute Y_0_tilde with corrector term for A0
-        ViewType A0_result_("A0_result_", m);
-        ViewType A1_result("A1_result", m);
-        A0.multiply_parallel_s_and_v(Y_2, A0_result_);  // F_0(n, Y_2)
-        A0.multiply_parallel_s_and_v(U, A1_result);    // F_0(n-1, U) (reusing A1_result as temp)
-        
-        Kokkos::parallel_for("Y0_tilde_computation", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor_n = std::exp(r_f * delta_t * n);
-            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+        // Step 4: Calculate Y_0_tilde with the corrector term
+        ViewType A0_Y2_result("A0_Y2_result", m);
+        A0.multiply_parallel_s_and_v(Y_2, A0_Y2_result);
+        Kokkos::parallel_for("Y0_tilde", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
             Y_0_tilde(i) = Y_0(i) + 0.5 * delta_t * (
-                (A0_result_(i) + b0(i) * exp_factor_n) -
-                (A1_result(i) + b0(i) * exp_factor_nm1)
+                (A0_Y2_result(i) + b0(i) * exp_factor_now) - 
+                (A0_result(i) + b0(i) * exp_factor_prev)
             );
         });
-
-        // Step 5: Compute final rhs_1 and solve for Y_1_tilde
-        A1.multiply_parallel_s_and_v(U, A1_result);
         
-        Kokkos::parallel_for("A1_final_rhs", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor_n = std::exp(r_f * delta_t * n);
-            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
-            double rhs = Y_0_tilde(i) + theta * delta_t * (b1(i) * exp_factor_n - (A1_result(i) + b1(i) * exp_factor_nm1));
-            Y_0_tilde(i) = rhs;  // Reuse Y_0_tilde for RHS
+        // Step 5: Second Y_1 solve
+        Kokkos::parallel_for("Second_Y1_rhs", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
+            Y_1_tilde(i) = Y_0_tilde(i) + theta * delta_t * (b1(i) * exp_factor_now - (A1_result(i) + b1(i) * exp_factor_prev));
         });
-        
-        A1.solve_implicit_parallel_v(Y_1_tilde, Y_0_tilde);
+        A1.solve_implicit_parallel_v(Y_1_tilde, Y_1_tilde);
 
         // Step 6: Final A2 solve with shuffling
-        shuffle_vector(U, U_shuffled, m1, m2);
-        A2_shuf.multiply(U_shuffled, A2_result_shuffled);
-        unshuffle_vector(A2_result_shuffled, A2_result, m1, m2);
-        
-        Kokkos::parallel_for("A2_final_rhs", m, KOKKOS_LAMBDA(const int i) {
-            double exp_factor_n = std::exp(r_f * delta_t * n);
-            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
-            double rhs = Y_1_tilde(i) + theta * delta_t * (b2(i) * exp_factor_n - (A2_result(i) + b2(i) * exp_factor_nm1));
-            Y_1_tilde(i) = rhs;  // Reuse Y_1_tilde for RHS
+        Kokkos::parallel_for("Final_U_rhs", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_now = std::exp(r_f * delta_t * n);
+            double exp_factor_prev = std::exp(r_f * delta_t * (n-1));
+            U(i) = Y_1_tilde(i) + theta * delta_t * (b2(i) * exp_factor_now - (A2_result(i) + b2(i) * exp_factor_prev));
         });
 
-        shuffle_vector(Y_1_tilde, Y_1_tilde_shuffled, m1, m2);
+        shuffle_vector(U, Y_1_tilde_shuffled, m1, m2);
         A2_shuf.solve_implicit(next_U_shuffled, Y_1_tilde_shuffled);
         unshuffle_vector(next_U_shuffled, U, m1, m2);
     }
