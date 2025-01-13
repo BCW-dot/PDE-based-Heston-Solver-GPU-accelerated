@@ -705,8 +705,8 @@ void test_DO_m1_convergence() {
     const double ref_price = 8.8948693600540167;
     
     // Test parameters
-    std::vector<int> m1_sizes = {20, 30, 40, 50, 60, 70, 80};
-    int fixed_m2 = 25;
+    std::vector<int> m1_sizes = {20, 30, 40, 50, 60, 70, 80, 100, 120, 170, 200, 250, 300};
+    int fixed_m2 = 50;
     
     std::cout << "Starting convergence test with fixed m2 = " << fixed_m2 << std::endl;
     
@@ -1017,7 +1017,7 @@ void test_shuffled_convergence() {
 CS scheme tests
 
 */
-/*
+
 void test_CS_scheme_call(){
     using timer = std::chrono::high_resolution_clock;
     // Market parameters
@@ -1104,7 +1104,7 @@ void test_CS_scheme_call(){
     //EXPECT_NEAR(option_price, reference_price, 0.1);
     ResultsExporter::exportToCSV("heston_cs_scheme", grid, U);
 }
-
+/*
 void test_CS_convergence() {
     // Market parameters
     const double K = 100.0;
@@ -1147,6 +1147,86 @@ void test_CS_convergence() {
     ConvergenceExporter::exportTimeStepConvergenceToCSV("cs_scheme_N", data_N);
 }
 */
+
+
+void test_CS_shuffled() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = K;
+    double V_0 = 0.04;
+    double T = 1.0;
+    double r_d = 0.025;
+    double r_f = 0.0;
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 50;
+    int m2 = 25;
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 20;
+    double theta = 0.8;
+
+    // Create grid
+    Grid grid = create_test_grid(m1, m2);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);
+    
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+    
+    // Build implicit systems
+    A1.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+   
+
+    // Create boundary conditions
+    BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(Kokkos::View<double*>("Vec_s", m1 + 1));
+
+    // Create initial condition and result vectors
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Initialize U_0 with payoff
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j*(m1+1)) = std::max(grid.Vec_s[i] - K, 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Run CS scheme with shuffling
+    CS_scheme_shuffled(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
+
+    // Print results if needed
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+    
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    // Compare with reference price (from Python/Monte Carlo)
+    const double reference_price = 8.8948693600540167;
+    std::cout << "CS_scheme price: " << std::setprecision(6) << option_price << std::endl;
+    std::cout << "CS_ scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+    //EXPECT_NEAR(option_price, reference_price, 0.1);
+    ResultsExporter::exportToCSV("shuffled_heston_cs_scheme", grid, U);
+}
+
 
 void test_parallel_tridiagonal2() {
     using timer = std::chrono::high_resolution_clock;
@@ -1214,10 +1294,10 @@ void test_DO_scheme() {
         {
         //test_parallel_tridiagonal2();
         //test_heston_call();
-        //test_DO_m1_convergence();
+        test_DO_m1_convergence();
         //test_all_convergence();
 
-        test_heston_call_shuffled();
+        //test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
         //test_shuffled_convergence();
 
@@ -1226,6 +1306,7 @@ void test_DO_scheme() {
         //the matrix
         //test_CS_scheme_call();
         //test_CS_convergence();
+        //test_CS_shuffled();
 
         } // All test objects destroyed here
     Kokkos::finalize();
