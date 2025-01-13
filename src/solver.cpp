@@ -99,9 +99,9 @@ public:
             A1.build_matrix(grid, rho, sigma, r_d, r_f);
             A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
-            const int N = 75;
+            const int N = 50;
             const double delta_t = T / N;
-            const double theta = 0.5;
+            const double theta = 0.8;
 
             // Build implicit matrices
             A1.build_implicit(theta, delta_t);
@@ -351,9 +351,9 @@ public:
         A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
         A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
-        const int N = 75;
+        const int N = 20;
         const double delta_t = T / N;
-        const double theta = 0.5;
+        const double theta = 0.8;
 
         A1.build_implicit(theta, delta_t);
         A2.build_implicit(theta, delta_t);
@@ -379,7 +379,7 @@ public:
 
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> duration = (end - start);
-        //double duration = 0;
+        
 
         auto t_end = std::chrono::high_resolution_clock::now();
 
@@ -440,9 +440,9 @@ public:
             A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
             A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
-            const int N = 75;
+            const int N = 20;
             const double delta_t = T / N;
-            const double theta = 0.5;
+            const double theta = 0.8;
 
             A1.build_implicit(theta, delta_t);
             A2.build_implicit(theta, delta_t);
@@ -1294,12 +1294,12 @@ void test_DO_scheme() {
         {
         //test_parallel_tridiagonal2();
         //test_heston_call();
-        test_DO_m1_convergence();
+        //test_DO_m1_convergence();
         //test_all_convergence();
 
         //test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
-        //test_shuffled_convergence();
+        test_shuffled_convergence();
 
         //has a bug in it, I dont think it is a bug, but rather bad numerics for the A2 matrix
         //we need to account for oszillation. Will produce fourth diagonal at the lower half of 
