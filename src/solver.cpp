@@ -615,8 +615,8 @@ void test_heston_call(){
     const double eta = 0.04;
     
     // Test parameters matching Python version
-    const int m1 = 50;
-    const int m2 = 25;
+    const int m1 = 300;
+    const int m2 = 100;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     const int m = (m1 + 1) * (m2 + 1);
@@ -788,8 +788,8 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 300;
-    int m2 = 100;
+    int m1 = 50;
+    int m2 = 25;
     int m = (m1 + 1) * (m2 + 1);
     int N = 20;
     double theta = 0.8;
@@ -986,7 +986,7 @@ void test_shuffled_convergence() {
     const double ref_price = 8.8948693600540167;
     
     // Test m1 convergence
-    std::vector<int> m1_sizes = {50, 75, 100, 150, 200, 250, 300};
+    std::vector<int> m1_sizes = {50, 75, 100, 150, 200, 250, 300, 400, 500, 600};
     int fixed_m2 = 100;
     auto data_m1 = ConvergenceExporter::testFixedM2VaryM1_shuffled(
         fixed_m2, m1_sizes, ref_price,
@@ -1217,9 +1217,9 @@ void test_DO_scheme() {
         //test_DO_m1_convergence();
         //test_all_convergence();
 
-        //test_heston_call_shuffled();
+        test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
-        test_shuffled_convergence();
+        //test_shuffled_convergence();
 
         //has a bug in it, I dont think it is a bug, but rather bad numerics for the A2 matrix
         //we need to account for oszillation. Will produce fourth diagonal at the lower half of 

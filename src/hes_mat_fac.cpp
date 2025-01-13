@@ -617,6 +617,152 @@ void test_heston_A1() {
     }   // Scope ends here, Kokkos objects destroyed
 }
 
+//This test compare the explicit and implicit output of a simple test case vector. It is compared to the python implementation
+//and checked that the outputs align. This test was written when i saw oszillatory behavior in the m1 direction when increasing
+//this dimension size
+void test_A1_structure() {
+    // Test dimensions
+    int m1 = 4;  // Small dimensions for readable output
+    int m2 = 3;
+    
+    Grid grid = create_test_grid(m1, m2);
+    
+    // Create and build A1 matrix
+    heston_A1Storage_gpu A1(m1, m2);
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double r_f = 0.0;
+    
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    
+    const int total_size = (m1 + 1) * (m2 + 1);
+    std::cout << "\nA1 Matrix Structure:";
+    std::cout << "\nShape: [" << total_size << ", " << total_size << "]" << std::endl;
+
+    std::cout << "\nA1 Matrix Values by Block:" << std::endl;
+        
+    auto h_main = Kokkos::create_mirror_view(A1.get_main_diags());
+    auto h_lower = Kokkos::create_mirror_view(A1.get_lower_diags());
+    auto h_upper = Kokkos::create_mirror_view(A1.get_upper_diags());
+    
+    Kokkos::deep_copy(h_main, A1.get_main_diags());
+    Kokkos::deep_copy(h_lower, A1.get_lower_diags());
+    Kokkos::deep_copy(h_upper, A1.get_upper_diags());
+    
+    for(int j = 0; j <= m2; j++) {
+        std::cout << "\nBlock j=" << j << ":" << std::endl;
+        
+        // Print lower diagonal
+        std::cout << "\n  Lower diagonal for block " << j << ":" << std::endl;
+        for(int i = 0; i < m1; i++) {
+            double val = h_lower(j,i);
+            if(std::abs(val) > 1e-10) {
+                std::cout << "    [" << i+1 << "," << i << "] = " 
+                            << std::fixed << std::setprecision(6) << val << std::endl;
+            }
+        }
+        
+        // Print main diagonal
+        std::cout << "\n  Main diagonal for block " << j << ":" << std::endl;
+        for(int i = 0; i <= m1; i++) {
+            double val = h_main(j,i);
+            if(std::abs(val) > 1e-10) {
+                std::cout << "    [" << i << "," << i << "] = " 
+                            << std::fixed << std::setprecision(6) << val << std::endl;
+            }
+        }
+        
+        // Print upper diagonal
+        std::cout << "\n  Upper diagonal for block " << j << ":" << std::endl;
+        for(int i = 0; i < m1; i++) {
+            double val = h_upper(j,i);
+            if(std::abs(val) > 1e-10) {
+                std::cout << "    [" << i << "," << i+1 << "] = " 
+                            << std::fixed << std::setprecision(6) << val << std::endl;
+            }
+        }
+    }
+    
+    // Create test vectors
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> b("b", total_size);
+    Kokkos::View<double*> result("result", total_size);
+    
+    auto h_x = Kokkos::create_mirror_view(x);
+    auto h_b = Kokkos::create_mirror_view(b);
+    
+    // Simple counting vectors
+    for(int i = 0; i < total_size; i++) {
+        h_x(i) = i + 1.0;
+        h_b(i) = total_size - i;
+    }
+    
+    std::cout << "\nTest vector x first 10 values:" << std::endl;
+    for(int i = 0; i < std::min(10, total_size); i++) {
+        std::cout << "x[" << i << "] = " << std::fixed 
+                    << std::setprecision(6) << h_x(i) << std::endl;
+    }
+    
+    std::cout << "\nTest vector b first 10 values:" << std::endl;
+    for(int i = 0; i < std::min(10, total_size); i++) {
+        std::cout << "b[" << i << "] = " << std::fixed 
+                    << std::setprecision(6) << h_b(i) << std::endl;
+    }
+    
+    Kokkos::deep_copy(x, h_x);
+    Kokkos::deep_copy(b, h_b);
+    
+    // Test explicit multiplication
+    A1.multiply(x, result);
+    
+    auto h_result = Kokkos::create_mirror_view(result);
+    Kokkos::deep_copy(h_result, result);
+    
+    std::cout << "\nExplicit multiplication first 10 results:" << std::endl;
+    for(int i = 0; i < std::min(30, total_size); i++) {
+        std::cout << "result[" << i << "] = " << std::fixed 
+                    << std::setprecision(6) << h_result(i) << std::endl;
+    }
+    
+    // Test implicit solve
+    double theta = 0.8;
+    double delta_t = 1.0/20;
+    A1.build_implicit(theta, delta_t);
+    A1.solve_implicit(x, b);
+    
+    auto h_implicit = Kokkos::create_mirror_view(x);
+    Kokkos::deep_copy(h_implicit, x);
+    
+    std::cout << "\nImplicit solve first 10 results:" << std::endl;
+    for(int i = 0; i < std::min(30, total_size); i++) {
+        std::cout << "implicit_result[" << i << "] = " << std::fixed 
+                    << std::setprecision(6) << h_implicit(i) << std::endl;
+    }
+    
+    // Print structure of first block
+    /*
+    auto h_main = Kokkos::create_mirror_view(A1.get_main_diags());
+    auto h_lower = Kokkos::create_mirror_view(A1.get_lower_diags());
+    auto h_upper = Kokkos::create_mirror_view(A1.get_upper_diags());
+    
+    Kokkos::deep_copy(h_main, A1.get_main_diags());
+    Kokkos::deep_copy(h_lower, A1.get_lower_diags());
+    Kokkos::deep_copy(h_upper, A1.get_upper_diags());
+    
+    std::cout << "\nSparsity pattern for first block:" << std::endl;
+    for(int i = 0; i <= m1; i++) {
+        for(int j = 0; j <= m1; j++) {
+            bool is_nonzero = false;
+            if(j == i) is_nonzero = std::abs(h_main(0,i)) > 1e-10;
+            if(j == i-1 && i > 0) is_nonzero = std::abs(h_lower(0,i-1)) > 1e-10;
+            if(j == i+1 && i < m1) is_nonzero = std::abs(h_upper(0,i)) > 1e-10;
+            std::cout << (is_nonzero ? 'X' : '.');
+        }
+        std::cout << std::endl;
+    }
+    */
+}
 
 /*
 struct heston_A2Storage_gpu {
@@ -1572,9 +1718,11 @@ void test_hes_mat_fac() {
         try {
             std::cout << "Default execution space: " << Kokkos::DefaultExecutionSpace::name() << std::endl;
 
-            test_heston_A0();
+            //test_heston_A0();
             //test_heston_A1();
             //test_heston_A2();
+
+            test_A1_structure();
             
             //test_A0_multiply();
             //test_parallel_tridiagonal();
