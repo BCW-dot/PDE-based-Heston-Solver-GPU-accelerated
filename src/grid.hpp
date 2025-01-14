@@ -1,10 +1,17 @@
 #pragma once
+#include <Kokkos_Core.hpp>
 
 struct Grid {
     std::vector<double> Vec_s;
     std::vector<double> Delta_s;
     std::vector<double> Vec_v;
     std::vector<double> Delta_v;
+
+    // Device Views (added)
+    Kokkos::View<double*> device_Vec_s;
+    Kokkos::View<double*> device_Vec_v;
+    Kokkos::View<double*> device_Delta_s;
+    Kokkos::View<double*> device_Delta_v;
 
     static double Map_s(double xi, double K, double c);
     static double Map_v(double xi, double d);

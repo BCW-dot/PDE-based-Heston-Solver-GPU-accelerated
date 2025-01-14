@@ -59,6 +59,40 @@ Grid::Grid(int m1, double S, double S_0, double K, double c,
     for(int i = 0; i < m2; ++i) {
         Delta_v[i] = Vec_v[i + 1] - Vec_v[i];
     }
+
+    //Device Copying, only needed for calibration process
+
+    // After vectors are filled, create device Views and copy data
+    device_Vec_s = Kokkos::View<double*>("Vec_s_device", m1 + 1);
+    device_Vec_v = Kokkos::View<double*>("Vec_v_device", m2 + 1);
+    device_Delta_s = Kokkos::View<double*>("Delta_s_device", m1);
+    device_Delta_v = Kokkos::View<double*>("Delta_v_device", m2);
+
+    // Create host mirrors
+    auto h_Vec_s = Kokkos::create_mirror_view(device_Vec_s);
+    auto h_Vec_v = Kokkos::create_mirror_view(device_Vec_v);
+    auto h_Delta_s = Kokkos::create_mirror_view(device_Delta_s);
+    auto h_Delta_v = Kokkos::create_mirror_view(device_Delta_v);
+    
+    // Copy from vectors to host mirrors
+    for(int i = 0; i <= m1; i++) {
+        h_Vec_s(i) = Vec_s[i];
+    }
+    for(int i = 0; i <= m2; i++) {
+        h_Vec_v(i) = Vec_v[i];
+    }
+    for(int i = 0; i < m1; i++) {
+        h_Delta_s(i) = Delta_s[i];
+    }
+    for(int i = 0; i < m2; i++) {
+        h_Delta_v(i) = Delta_v[i];
+    }
+    
+    // Deep copy from host mirrors to device
+    Kokkos::deep_copy(device_Vec_s, h_Vec_s);
+    Kokkos::deep_copy(device_Vec_v, h_Vec_v);
+    Kokkos::deep_copy(device_Delta_s, h_Delta_s);
+    Kokkos::deep_copy(device_Delta_v, h_Delta_v);
 }
 
 // Helper function to create test grid

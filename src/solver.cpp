@@ -1243,7 +1243,7 @@ void test_CS_schuffled_implied_vol(){
     double S_0 = K;
     double V_0 = 0.04;
     double T = 1.0;
-    double r_d = 0.1;//0.025;
+    double r_d = 0.025;
     double r_f = 0.0;
     double rho = -0.9;
     double sigma = 0.3;

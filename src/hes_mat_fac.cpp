@@ -1204,8 +1204,8 @@ void test_A1_multiply_and_implicit() {
     using timer = std::chrono::high_resolution_clock;
     
     // Test dimensions
-    const int m1 = 3000;
-    const int m2 = 10000;
+    const int m1 = 100;
+    const int m2 = 50;
     std::cout << "Testing A1 with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
 
     // Create grid
@@ -1381,6 +1381,100 @@ void test_A2_multiply_and_implicit() {
     std::cout << "Residual norm: " << residual << std::endl;
 }
 */
+
+
+/*
+
+Here comes the test for the device A1 class
+
+*/
+
+void test_A1_device_in_one_kernel() {
+    // 1) Problem size
+    const int m1 = 10;
+    const int m2 = 5;
+    const int total_size = (m1 + 1) * (m2 + 1);
+
+    // 2) Construct a Grid (on host)
+    Grid grid = create_test_grid(m1, m2);
+
+    // 3) Allocate and construct the device-based PDE object (on host)
+    heston_A1_device A1_dev(m1, m2);
+
+    // 4) Create device Views for x and b
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> b("b", total_size);
+
+    // Optionally fill b with random or some known data
+    // We'll do a quick random fill on host side
+    {
+      auto h_b = Kokkos::create_mirror_view(b);
+      for(int i = 0; i < total_size; ++i) {
+         h_b(i) = (double) std::rand() / RAND_MAX;
+      }
+      Kokkos::deep_copy(b, h_b);
+    }
+
+    // 5) Create a device View to store the residual
+    Kokkos::View<double> residual_dev("residual_dev");
+
+    // 6) We must pass a pointer to A1_dev to call non‐const methods
+    auto A1_dev_ptr = &A1_dev;  
+
+    
+
+    /*
+    // 7) Launch a single-thread kernel that does everything on the device
+    Kokkos::parallel_for("test_A1_device_kernel", 
+                         Kokkos::RangePolicy<>(0,1),
+                         KOKKOS_LAMBDA(const int ) 
+    {
+      // PDE / numerical parameters
+      double rho     = -0.9;
+      double sigma   =  0.3;
+      double r_d     =  0.025;
+      double r_f     =  0.0;
+      double theta   =  0.8;
+      double delta_t =  1.0 / 14.0;
+
+      // Step A: Build the matrix (device-callable)
+      A1_dev_ptr->build_matrix_device(grid, rho, sigma, r_d, r_f);
+
+      // Step B: Build the implicit version
+      A1_dev_ptr->build_implicit_device(theta, delta_t);
+
+        
+      // Step C: Solve A1_dev * x = b (in implicit form)
+      A1_dev_ptr->solve_implicit_device(x, b);
+
+      // Step D: Compute a residual measure
+      // Residual = x - theta*delta_t*(A1_dev*x) - b
+      Kokkos::View<double*> verify("verify", total_size);
+      A1_dev_ptr->multiply_device(x, verify);
+
+      double local_sum_sq = 0.0;
+      for (int i = 0; i < total_size; i++) {
+        double res = x(i) - theta * delta_t * verify(i) - b(i);
+        local_sum_sq += res * res;
+      }
+      // Store sqrt of that sum in our device scalar
+      residual_dev() = sqrt(local_sum_sq);
+      
+    });
+    Kokkos::fence();
+
+    // 8) Copy residual back to host and print
+    auto h_residual = Kokkos::create_mirror_view(residual_dev);
+    Kokkos::deep_copy(h_residual, residual_dev);
+
+    std::cout << "test_A1_device_in_one_kernel: Residual norm = " 
+              << h_residual() << "\n";
+              */
+}
+
+
+
+
 
 
 /*
@@ -1723,12 +1817,14 @@ void test_hes_mat_fac() {
             //test_heston_A1();
             //test_heston_A2();
 
-            test_A1_structure();
+            //test_A1_structure();
             
             //test_A0_multiply();
             //test_parallel_tridiagonal();
             //test_A1_multiply_and_implicit();
             //test_A2_multiply_and_implicit();
+
+            test_A1_device_in_one_kernel();
 
             //test_heston_A1_coalesc();
             //test_A1_multiply_and_implicit_coalesc();

@@ -298,6 +298,7 @@ inline void heston_A1Storage_gpu::solve_implicit(Kokkos::View<double*>& x, const
         Kokkos::fence();
     }
   
+
 inline void heston_A1Storage_gpu::solve_implicit_parallel_v(Kokkos::View<double*>& x, const Kokkos::View<double*>& b) {
     const int local_m1 = m1;
     const int local_m2 = m2;
@@ -338,7 +339,172 @@ inline void heston_A1Storage_gpu::solve_implicit_parallel_v(Kokkos::View<double*
 }
 
 
+/*
 
+GPU A1 class. This implements the above A1 class, but this time s.t. its methods are callable form the GPU. This is needed for the
+calibration process where we fill the Jacobianmatrix J in parallel. Each entry is one option value computation and therefor need to 
+call the methods like A1.explicit() in parallel
+
+*/
+
+class heston_A1_device {
+private:
+    int m1, m2;
+
+    // Explicit system diagonals - 2D Views [variance_level][stock_index]
+    Kokkos::View<double**> main_diags;    // [m2+1][m1+1]
+    Kokkos::View<double**> lower_diags;   // [m2+1][m1]
+    Kokkos::View<double**> upper_diags;   // [m2+1][m1]
+
+    // Implicit system diagonals
+    Kokkos::View<double**> implicit_main_diags;
+    Kokkos::View<double**> implicit_lower_diags;
+    Kokkos::View<double**> implicit_upper_diags;
+
+    // Temporary storage for implicit solve
+    Kokkos::View<double**> temp_para;     // [m2+1][m1+1]
+
+public:
+    // Default constructor for device compatibility
+    KOKKOS_DEFAULTED_FUNCTION
+    heston_A1_device() = default;
+
+    // Main constructor - host only as it allocates memory
+    heston_A1_device(int m1_in, int m2_in) : m1(m1_in), m2(m2_in) {
+        // Allocate explicit system diagonals
+        main_diags = Kokkos::View<double**>("A1_main_diags", m2+1, m1+1);
+        lower_diags = Kokkos::View<double**>("A1_lower_diags", m2+1, m1);
+        upper_diags = Kokkos::View<double**>("A1_upper_diags", m2+1, m1);
+
+        // Allocate implicit system diagonals
+        implicit_main_diags = Kokkos::View<double**>("A1_impl_main_diags", m2+1, m1+1);
+        implicit_lower_diags = Kokkos::View<double**>("A1_impl_lower_diags", m2+1, m1);
+        implicit_upper_diags = Kokkos::View<double**>("A1_impl_upper_diags", m2+1, m1);
+
+        // Allocate workspace
+        temp_para = Kokkos::View<double**>("A1_temp_para", m2+1, m1+1);
+    }
+
+    // Matrix building method - callable from device
+    KOKKOS_FUNCTION
+    void build_matrix_device(const Grid& grid, double rho, double sigma, double r_d, double r_f) {
+        // Loop over variance levels
+        for(int j = 0; j <= m2; j++) {
+            // First entry in each block
+            main_diags(j,0) = 0.0;
+            
+            // Interior points
+            for(int i = 1; i < m1; i++) {
+                // PDE coefficients
+                double a = 0.5 * grid.device_Vec_s[i] * grid.device_Vec_s[i] * grid.device_Vec_v[j];
+                double b = (r_d - r_f) * grid.device_Vec_s[i];
+
+                // Build tridiagonal system for this level
+                // Lower diagonal
+                lower_diags(j,i-1) = a * device_delta_s(i-1, -1, grid.device_Delta_s) + 
+                                    b * device_beta_s(i-1, -1, grid.device_Delta_s);
+                
+                // Main diagonal
+                main_diags(j,i) = a * device_delta_s(i-1, 0, grid.device_Delta_s) + 
+                                 b * device_beta_s(i-1, 0, grid.device_Delta_s) - 0.5 * r_d;
+                
+                // Upper diagonal
+                upper_diags(j,i) = a * device_delta_s(i-1, 1, grid.device_Delta_s) + 
+                                  b * device_beta_s(i-1, 1, grid.device_Delta_s);
+            }
+            
+            // Last entry in block
+            main_diags(j,m1) = -0.5 * r_d;
+        }
+    }
+
+    // Build implicit system - callable from device
+    KOKKOS_FUNCTION
+    void build_implicit_device(const double theta, const double delta_t) {
+        for(int j = 0; j <= m2; j++) {
+            // Main diagonal entries
+            for(int i = 0; i <= m1; i++) {
+                implicit_main_diags(j,i) = 1.0 - theta * delta_t * main_diags(j,i);
+            }
+            
+            // Off-diagonal entries
+            for(int i = 0; i < m1; i++) {
+                implicit_lower_diags(j,i) = -theta * delta_t * lower_diags(j,i);
+                implicit_upper_diags(j,i) = -theta * delta_t * upper_diags(j,i);
+            }
+        }
+    }
+
+    // Explicit multiply for a single block - callable from device
+    KOKKOS_FUNCTION
+    inline void multiply_device(const Kokkos::View<double*>& x, Kokkos::View<double*>& result);
+
+    // Implicit solve for a single block - callable from device
+    KOKKOS_FUNCTION
+    inline void solve_implicit_device(Kokkos::View<double*>& x, const Kokkos::View<double*>& b);
+
+    // Getters
+    KOKKOS_INLINE_FUNCTION int get_m1() const { return m1; }
+    KOKKOS_INLINE_FUNCTION int get_m2() const { return m2; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_main_diags() const { return main_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_lower_diags() const { return lower_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_upper_diags() const { return upper_diags; }
+};
+
+
+// Multiply function - kept inline for performance
+KOKKOS_FUNCTION
+inline void heston_A1_device::multiply_device(const Kokkos::View<double*>& x, Kokkos::View<double*>& result){
+    using policy = Kokkos::MDRangePolicy<Kokkos::Rank<2>>;
+    policy parallel_policy({0,0}, {m2+1, m1+1});
+
+    Kokkos::parallel_for("A1_multiply", parallel_policy,
+    KOKKOS_LAMBDA(const int j, const int i) {
+        const int offset = j * (m1 + 1);
+        double sum = main_diags(j,i) * x(offset + i);
+
+        if(i > 0) {
+        sum += lower_diags(j,i-1) * x(offset + i-1);
+        }
+        if(i < m1) {
+        sum += upper_diags(j,i) * x(offset + i+1);
+        }
+        result(offset + i) = sum;
+    }
+    );
+    Kokkos::fence();
+}
+
+KOKKOS_FUNCTION
+inline void heston_A1_device::solve_implicit_device(Kokkos::View<double*>& x, const Kokkos::View<double*>& b){
+    // Parallel over variance levels
+    Kokkos::parallel_for("A1_implicit_solve", m2 + 1, KOKKOS_LAMBDA(const int j) {
+        const int offset = j * (m1 + 1);
+        
+        // Forward sweep
+        // First entry
+        temp_para(j,0) = implicit_main_diags(j,0);
+        x(offset) = b(offset);
+        
+        // Interior points forward sweep
+        for(int i = 1; i <= m1; i++) {
+            double m = implicit_lower_diags(j,i-1) / temp_para(j,i-1);
+            temp_para(j,i) = implicit_main_diags(j,i) - m * implicit_upper_diags(j,i-1);
+            x(offset + i) = b(offset + i) - m * x(offset + i-1);
+        }
+        
+        // Back substitution
+        // Last point
+        x(offset + m1) /= temp_para(j,m1);
+        
+        // Interior points back substitution
+        for(int i = m1-1; i >= 0; i--) {
+            x(offset + i) = (x(offset + i) - 
+                implicit_upper_diags(j,i) * x(offset + i+1)) / temp_para(j,i);
+        }
+    });
+    Kokkos::fence();
+}
 
 /*
 
