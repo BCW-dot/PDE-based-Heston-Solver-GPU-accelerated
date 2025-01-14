@@ -6,6 +6,8 @@
 #include <fstream>
 //for std::setprecision
 #include <iomanip>
+//implied vol
+#include "bs.hpp"
 
 
 class ResultsExporter {
@@ -99,7 +101,7 @@ public:
             A1.build_matrix(grid, rho, sigma, r_d, r_f);
             A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
-            const int N = 50;
+            const int N = 20;
             const double delta_t = T / N;
             const double theta = 0.8;
 
@@ -124,8 +126,8 @@ public:
             Kokkos::deep_copy(U_0, h_U_0);
 
             // Run solver
-            //DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-            CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
 
             // Get price
             auto h_U = Kokkos::create_mirror_view(U);
@@ -185,9 +187,9 @@ public:
             A1.build_matrix(grid, rho, sigma, r_d, r_f);
             A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
-            const int N = 75;
+            const int N = 20;
             const double delta_t = T / N;
-            const double theta = 0.5;
+            const double theta = 0.8;
 
             // Build implicit matrices
             A1.build_implicit(theta, delta_t);
@@ -213,8 +215,8 @@ public:
             // Start timing
             auto start = std::chrono::high_resolution_clock::now();
 
-            //DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-            CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
 
 
             // Record time
@@ -274,7 +276,7 @@ public:
             A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
             const double delta_t = T / N;
-            const double theta = 0.5;
+            const double theta = 0.8;
 
             A1.build_implicit(theta, delta_t);
             A2.build_implicit(theta, delta_t);
@@ -294,8 +296,8 @@ public:
             Kokkos::deep_copy(U_0, h_U_0);
 
             auto start = std::chrono::high_resolution_clock::now();
-            //DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-            CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
 
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> duration = end - start;
@@ -358,7 +360,7 @@ public:
 
         const int N = 20;
         const double delta_t = T / N;
-        const double theta = 0.8;
+        const double theta = 0.5;
 
         A1.build_implicit(theta, delta_t);
         A2.build_implicit(theta, delta_t);
@@ -445,9 +447,9 @@ public:
             A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
             A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
-            const int N = 20;
+            const int N = 80;
             const double delta_t = T / N;
-            const double theta = 0.8;
+            const double theta = 0.5;
 
             A1.build_implicit(theta, delta_t);
             A2.build_implicit(theta, delta_t);
@@ -748,7 +750,7 @@ void test_all_convergence() {
     
     // Test m1 convergence
     std::vector<int> m1_sizes = {50, 75, 100, 150, 200, 250, 300};
-    int fixed_m2 = 50;
+    int fixed_m2 = 100;
     auto data_m1 = ConvergenceExporter::testFixedM2VaryM1(
         fixed_m2, m1_sizes, ref_price,
         K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
@@ -896,7 +898,7 @@ void test_heston_call_shuffled_vary_m1() {
         int m2 = fixed_m2;
         int m = (m1 + 1) * (m2 + 1);
         int N = 20;
-        double theta = 0.8;
+        double theta = 0.5;
 
         // Create grid
         Grid grid = create_test_grid(m1, m2);
@@ -992,7 +994,7 @@ void test_shuffled_convergence() {
     const double ref_price = 8.8948693600540167;
     
     // Test m1 convergence
-    std::vector<int> m1_sizes = {50, 75, 100, 150, 200, 250, 300, 400, 500, 600};
+    std::vector<int> m1_sizes = {50, 75, 100, 150, 200, 250, 300};
     int fixed_m2 = 100;
     auto data_m1 = ConvergenceExporter::testFixedM2VaryM1_shuffled(
         fixed_m2, m1_sizes, ref_price,
@@ -1166,14 +1168,14 @@ void test_CS_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    // Test parameters matching Python version
-    const int m1 = 200;
-    const int m2 = 100;
+    
+    const int m1 = 50;
+    const int m2 = 25;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     const int m = (m1 + 1) * (m2 + 1);
 
-    const int N = 40;
+    const int N = 15;
     const double delta_t = T / N;
     const double theta = 0.8;
     std::cout << "Time Dimension: " << N << std::endl;
@@ -1235,6 +1237,235 @@ void test_CS_shuffled() {
     ResultsExporter::exportToCSV("shuffled_heston_cs_scheme", grid, U);
 }
 
+void test_CS_schuffled_implied_vol(){
+    // Test parameters
+    double K = 100.0;
+    double S_0 = K;
+    double V_0 = 0.04;
+    double T = 1.0;
+    double r_d = 0.1;//0.025;
+    double r_f = 0.0;
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    
+    const int m1 = 200;
+    const int m2 = 100;
+    std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
+
+    const int m = (m1 + 1) * (m2 + 1);
+
+    const int N = 40;
+    const double delta_t = T / N;
+    const double theta = 0.8;
+    std::cout << "Time Dimension: " << N << std::endl;
+    std::cout << "Theta: " << theta << std::endl;
+
+    // Create grid
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);
+    
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    
+    // Build implicit systems
+    A1.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+   
+    // Create boundary conditions
+    BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
+
+    // Create initial condition and result vectors
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Initialize U_0 with payoff
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j*(m1+1)) = std::max(grid.Vec_s[i] - K, 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Run CS scheme with shuffling
+    CS_scheme_shuffled(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
+
+    // Print results if needed
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    // Compare with reference price (from Python/Monte Carlo)
+    const double reference_price = 8.8948693600540167;
+    std::cout << "CS_scheme price: " << std::setprecision(12) << option_price << std::endl;
+    //std::cout << "CS_scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+    
+    // Parameters for implied volatility computation
+    const double epsilon = 0.01;
+    const int num_s_inf = 5;
+    const int num_s_sup = 6;
+    const int num_v_inf = 1;
+    const int num_v_sup = 10;
+
+    // Initialize IV with correct dimensions
+    std::vector<std::vector<double>> IV(num_v_sup - num_v_inf + 1, 
+                                    std::vector<double>(num_s_sup + num_s_inf + 1));
+
+    // No need for intermediate Vec_s_IV and Vec_v_IV vectors
+    // Keep price array in original ordering
+    std::vector<std::vector<double>> price(m2 + 1, std::vector<double>(m1 + 1));
+    for(int j = 0; j <= m2; j++) {
+        for(int i = 0; i <= m1; i++) {
+            price[j][i] = h_U[i + j*(m1+1)];
+        }
+    }
+
+    // Compute implied volatilities
+    for(int j = 0; j < num_v_sup - num_v_inf + 1; j++) {
+        int v_idx = index_v - num_v_inf + j;
+        for(int i = 0; i < num_s_sup + num_s_inf + 1; i++) {
+            int s_idx = index_s - num_s_inf + i;
+
+            IV[j][i] = BlackScholes::reverse_BS_new(
+                1,                    // CP
+                grid.Vec_s[s_idx],   // S
+                K,                   // Strike
+                r_f,                 // Risk-free rate
+                T,                   // Time to maturity
+                0.5,                 // Initial guess
+                price[v_idx][s_idx], // Target price
+                epsilon              // Tolerance
+            );
+        }
+    }
+
+    // Write results to CSV file
+    std::ofstream outfile("implied_volatility_surface.csv");
+
+    // Write header
+    outfile << "Variance/Stock";
+    for(int i = 0; i < num_s_sup + num_s_inf + 1; i++) {
+        int s_idx = index_s - num_s_inf + i;
+        outfile << "," << grid.Vec_s[s_idx];
+    }
+    outfile << "\n";
+
+    // Write data rows
+    for(int j = 0; j < num_v_sup - num_v_inf + 1; j++) {
+        int v_idx = index_v - num_v_inf + j;
+        outfile << grid.Vec_v[v_idx];
+        for(int i = 0; i < num_s_sup + num_s_inf + 1; i++) {
+            outfile << "," << IV[j][i];
+        }
+        outfile << "\n";
+    }
+    outfile.close();
+}
+
+void test_black_scholes() {
+    std::cout << "\nTesting Black-Scholes Implementation\n";
+    std::cout << "===================================\n\n";
+    
+    // Test parameters
+    double S = 100.0;  // Current stock price
+    double K = 100.0;  // Strike price
+    double r = 0.025;  // Risk-free rate
+    double T = 1.0;    // Time to maturity
+    double v = 0.3;    // Volatility
+    int CP = 1;        // Call option
+    
+    std::cout << "Parameters:\n";
+    std::cout << "Stock price (S): " << S << "\n";
+    std::cout << "Strike price (K): " << K << "\n";
+    std::cout << "Risk-free rate (r): " << r << "\n";
+    std::cout << "Time to maturity (T): " << T << "\n";
+    std::cout << "Volatility (v): " << v << "\n\n";
+    
+    // Test 1: Call price calculation
+    double call_price = BlackScholes::call_price(CP, S, K, r, v, T);
+    std::cout << "Test 1 - Call Price Calculation\n";
+    std::cout << "Call price: " << call_price << "\n";
+    // For ATM option with these parameters, price should be roughly 11-13
+    if (call_price > 11.0 && call_price < 13.0) {
+        std::cout << "✓ Price is in expected range\n\n";
+    } else {
+        std::cout << "✗ Price is outside expected range\n\n";
+    }
+    
+    // Test 2: Vega calculation
+    double vega = BlackScholes::call_vega(CP, S, K, r, v, T);
+    std::cout << "Test 2 - Vega Calculation\n";
+    std::cout << "Vega: " << vega << "\n";
+    // Vega should be positive and roughly 30-40 for ATM option
+    if (vega > 0 && vega < 50.0) {
+        std::cout << "✓ Vega is in expected range\n\n";
+    } else {
+        std::cout << "✗ Vega is outside expected range\n\n";
+    }
+    
+    // Test 3: Implied volatility calculation (reverse engineering)
+    double epsilon = 0.0001;
+    double test_vol = BlackScholes::reverse_BS_new(CP, S, K, r, T, 0.5, call_price, epsilon);
+    std::cout << "Test 3 - Implied Volatility Calculation\n";
+    std::cout << "Original volatility: " << v << "\n";
+    std::cout << "Calculated implied volatility: " << test_vol << "\n";
+    if (std::abs(test_vol - v) < epsilon) {
+        std::cout << "✓ Implied volatility matches original within tolerance\n\n";
+    } else {
+        std::cout << "✗ Implied volatility calculation failed\n\n";
+    }
+    
+    // Test 4: Edge cases
+    std::cout << "Test 4 - Edge Cases\n";
+    
+    // Deep ITM option
+    double itm_price = BlackScholes::call_price(CP, 150.0, K, r, v, T);
+    std::cout << "Deep ITM price (S=150): " << itm_price << "\n";
+    if (itm_price > 50.0) {  // Should be at least intrinsic value
+        std::cout << "✓ Deep ITM price is reasonable\n";
+    } else {
+        std::cout << "✗ Deep ITM price seems incorrect\n";
+    }
+    
+    // Deep OTM option
+    double otm_price = BlackScholes::call_price(CP, 50.0, K, r, v, T);
+    std::cout << "Deep OTM price (S=50): " << otm_price << "\n";
+    if (otm_price < 1.0) {  // Should be small but positive
+        std::cout << "✓ Deep OTM price is reasonable\n";
+    } else {
+        std::cout << "✗ Deep OTM price seems incorrect\n";
+    }
+    
+    // Zero volatility case
+    double zero_vol_price = BlackScholes::call_price(CP, S, K, r, 0.0001, T);
+    double intrinsic = std::max(0.0, S - K * std::exp(-r * T));
+    std::cout << "Near-zero volatility price: " << zero_vol_price << "\n";
+    std::cout << "Intrinsic value: " << intrinsic << "\n";
+    if (std::abs(zero_vol_price - intrinsic) < 0.1) {
+        std::cout << "✓ Zero volatility case converges to intrinsic value\n";
+    } else {
+        std::cout << "✗ Zero volatility case failed\n";
+    }
+    
+    std::cout << "\nBlack-Scholes testing completed.\n";
+}
 
 
 
@@ -1317,8 +1548,10 @@ void test_DO_scheme() {
         //the matrix
         //test_CS_scheme_call();
         //test_CS_convergence();
-        test_CS_shuffled();
+        //test_CS_shuffled();
+        test_CS_schuffled_implied_vol();
 
         } // All test objects destroyed here
     Kokkos::finalize();
+    //test_black_scholes();
 }
