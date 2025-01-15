@@ -1385,95 +1385,180 @@ void test_A2_multiply_and_implicit() {
 
 /*
 
-Here comes the test for the device A1 class
+Here comes the test for the device A1 class. This is not workable as it stands right now, since the class is 
+living on the host, eventho it has Views as memeber variables, when we call it form a device function we are still 
+going through host memory. This results in a core dump error, i.e. accessing memory not allocated on the device.
+
+One fix is to rwrite the class and making it "Easily copyable" or to write the entire class on the device (this is 
+very very tricky)
 
 */
 
 void test_A1_device_in_one_kernel() {
-    // 1) Problem size
-    const int m1 = 10;
+    
+    // Test dimensions
+    const int m1 = 5;
     const int m2 = 5;
-    const int total_size = (m1 + 1) * (m2 + 1);
-
-    // 2) Construct a Grid (on host)
+    
+    // Create test grid
     Grid grid = create_test_grid(m1, m2);
-
-    // 3) Allocate and construct the device-based PDE object (on host)
-    heston_A1_device A1_dev(m1, m2);
-
-    // 4) Create device Views for x and b
-    Kokkos::View<double*> x("x", total_size);
-    Kokkos::View<double*> b("b", total_size);
-
-    // Optionally fill b with random or some known data
-    // We'll do a quick random fill on host side
-    {
-      auto h_b = Kokkos::create_mirror_view(b);
-      for(int i = 0; i < total_size; ++i) {
-         h_b(i) = (double) std::rand() / RAND_MAX;
-      }
-      Kokkos::deep_copy(b, h_b);
-    }
-
-    // 5) Create a device View to store the residual
-    Kokkos::View<double> residual_dev("residual_dev");
-
-    // 6) We must pass a pointer to A1_dev to call non‐const methods
-    auto A1_dev_ptr = &A1_dev;  
+    
+    // Create A1 device matrix
+    // 1) Create on host, as before
+    heston_A1_device A1_host(m1, m2);
 
     
 
     /*
-    // 7) Launch a single-thread kernel that does everything on the device
-    Kokkos::parallel_for("test_A1_device_kernel", 
-                         Kokkos::RangePolicy<>(0,1),
-                         KOKKOS_LAMBDA(const int ) 
-    {
-      // PDE / numerical parameters
-      double rho     = -0.9;
-      double sigma   =  0.3;
-      double r_d     =  0.025;
-      double r_f     =  0.0;
-      double theta   =  0.8;
-      double delta_t =  1.0 / 14.0;
+    // Get Views for verification
+    auto main = A1_dev_ptr->get_main_diags();
+    auto lower = A1_dev_ptr->get_lower_diags();
+    auto upper = A1_dev_ptr->get_upper_diags();
 
-      // Step A: Build the matrix (device-callable)
-      A1_dev_ptr->build_matrix_device(grid, rho, sigma, r_d, r_f);
-
-      // Step B: Build the implicit version
-      A1_dev_ptr->build_implicit_device(theta, delta_t);
-
+    // Create host mirrors
+    auto h_main = Kokkos::create_mirror_view(main);
+    auto h_lower = Kokkos::create_mirror_view(lower);
+    auto h_upper = Kokkos::create_mirror_view(upper);
+    
+    // Copy to host
+    Kokkos::deep_copy(h_main, main);
+    Kokkos::deep_copy(h_lower, lower);
+    Kokkos::deep_copy(h_upper, upper);
+    
+    // Print matrices for verification
+    std::cout << "A1 Device Matrix Structure:\n";
+    std::cout << "-------------------------\n";
+    
+    for(int j = 0; j <= m2; j++) {
+        std::cout << "\nVariance level j=" << j << ":\n";
         
-      // Step C: Solve A1_dev * x = b (in implicit form)
-      A1_dev_ptr->solve_implicit_device(x, b);
+        std::cout << "Lower diagonal: ";
+        for(int i = 0; i < m1; i++) {
+            std::cout << h_lower(j,i) << " ";
+        }
+        
+        std::cout << "\nMain diagonal:  ";
+        for(int i = 0; i <= m1; i++) {
+            std::cout << h_main(j,i) << " ";
+        }
+        
+        std::cout << "\nUpper diagonal: ";
+        for(int i = 0; i < m1; i++) {
+            std::cout << h_upper(j,i) << " ";
+        }
+        std::cout << "\n";
+    }
 
-      // Step D: Compute a residual measure
-      // Residual = x - theta*delta_t*(A1_dev*x) - b
-      Kokkos::View<double*> verify("verify", total_size);
-      A1_dev_ptr->multiply_device(x, verify);
-
-      double local_sum_sq = 0.0;
-      for (int i = 0; i < total_size; i++) {
-        double res = x(i) - theta * delta_t * verify(i) - b(i);
-        local_sum_sq += res * res;
-      }
-      // Store sqrt of that sum in our device scalar
-      residual_dev() = sqrt(local_sum_sq);
-      
-    });
-    Kokkos::fence();
-
-    // 8) Copy residual back to host and print
-    auto h_residual = Kokkos::create_mirror_view(residual_dev);
-    Kokkos::deep_copy(h_residual, residual_dev);
-
-    std::cout << "test_A1_device_in_one_kernel: Residual norm = " 
-              << h_residual() << "\n";
-              */
+    // Print dimensions
+    std::cout << "\nDimensions:\n";
+    std::cout << "m1: " << A1_dev_ptr->get_m1() << ", m2: " << A1_dev_ptr->get_m2() << "\n";
+    */
 }
 
 
+// DeviceCallable.hpp
+// Simple test to make the class device idea working. It isnt working
+#pragma once
+#include <Kokkos_Core.hpp>
 
+class DeviceCallable {
+private:
+    int size;
+    Kokkos::View<double*> data;
+
+public:
+    // Default constructor - must be device callable
+    KOKKOS_FUNCTION
+    DeviceCallable() : size(0) {}
+
+    // Constructor that can be called on device
+    KOKKOS_FUNCTION
+    DeviceCallable(int size_in, Kokkos::View<double*> data_in) 
+        : size(size_in), data(data_in) {}
+
+    // Device-callable build method
+    KOKKOS_FUNCTION
+    void build_matrix_device(const double factor1, const double factor2) {
+        for(int i = 0; i < size; i++) {
+            data(i) = factor1 * i + factor2;
+        }
+    }
+
+    // Device-callable compute method
+    KOKKOS_FUNCTION
+    double compute_device(const int idx) const {
+        if(idx < size) {
+            return data(idx) * data(idx);
+        }
+        return 0.0;
+    }
+
+    // Getters
+    KOKKOS_FUNCTION
+    int get_size() const { return size; }
+    
+    KOKKOS_FUNCTION
+    const Kokkos::View<double*>& get_data() const { return data; }
+};
+
+// Helper function to create device view of the class
+inline Kokkos::View<DeviceCallable*> create_device_object(int size) {
+    // Allocate data View that will be used by device object
+    Kokkos::View<double*> data("object_data", size);
+    
+    // Create View to hold device object
+    Kokkos::View<DeviceCallable*> d_object("device_object", 1);
+    
+    // Create host mirror
+    auto h_object = Kokkos::create_mirror_view(d_object);
+    
+    // Initialize host object
+    h_object(0) = DeviceCallable(size, data);
+    
+    // Copy to device
+    Kokkos::deep_copy(d_object, h_object);
+    
+    return d_object;
+}
+
+// Test function
+void test_device_callable() {
+            const int size = 100;
+            double factor1 = 2.0;
+            double factor2 = 1.0;
+            
+            // Create device object
+            auto d_object = create_device_object(size);
+            
+            // Call build_matrix_device on device
+            Kokkos::parallel_for("build", 1, KOKKOS_LAMBDA(const int) {
+                auto& obj = d_object(0);
+                obj.build_matrix_device(factor1, factor2);
+            });
+            Kokkos::fence();
+            
+            // Create result View for compute test
+            Kokkos::View<double*> results("results", size);
+            
+            // Call compute_device on device
+            Kokkos::parallel_for("compute", size, KOKKOS_LAMBDA(const int i) {
+                auto& obj = d_object(0);
+                results(i) = obj.compute_device(i);
+            });
+            Kokkos::fence();
+            
+            // Verify results
+            auto h_results = Kokkos::create_mirror_view(results);
+            Kokkos::deep_copy(h_results, results);
+            
+            // Check a few values
+            for(int i = 0; i < 5; i++) {
+                double expected = (factor1 * i + factor2) * (factor1 * i + factor2);
+                std::cout << "results[" << i << "] = " << h_results(i) 
+                         << " (expected: " << expected << ")" << std::endl;
+            }
+
+}
 
 
 
@@ -1824,7 +1909,8 @@ void test_hes_mat_fac() {
             //test_A1_multiply_and_implicit();
             //test_A2_multiply_and_implicit();
 
-            test_A1_device_in_one_kernel();
+            //test_A1_device_in_one_kernel();
+            test_device_callable();
 
             //test_heston_A1_coalesc();
             //test_A1_multiply_and_implicit_coalesc();

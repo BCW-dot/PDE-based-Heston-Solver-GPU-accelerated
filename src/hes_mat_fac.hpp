@@ -387,35 +387,51 @@ public:
 
     // Matrix building method - callable from device
     KOKKOS_FUNCTION
-    void build_matrix_device(const Grid& grid, double rho, double sigma, double r_d, double r_f) {
+    void build_matrix_device(double rho, double sigma, double r_d, double r_f) {
+        const int local_m1 = m1;
+        const int local_m2 = m2;
+        const auto local_main = main_diags;
+        const auto local_lower = lower_diags;
+        const auto local_upper = upper_diags;
+        
         // Loop over variance levels
-        for(int j = 0; j <= m2; j++) {
-            // First entry in each block
-            main_diags(j,0) = 0.0;
-            
+        /*
+        for(int j = 0; j <= local_m2; j++) {
             // Interior points
-            for(int i = 1; i < m1; i++) {
+            for(int i = 1; i < local_m1; i++) {
                 // PDE coefficients
-                double a = 0.5 * grid.device_Vec_s[i] * grid.device_Vec_s[i] * grid.device_Vec_v[j];
-                double b = (r_d - r_f) * grid.device_Vec_s[i];
+                double a = 0.5 * grid.device_Vec_s(i) * grid.device_Vec_s(i) * grid.device_Vec_v(j);
+                double b = (r_d - r_f) * grid.device_Vec_s(i);
 
                 // Build tridiagonal system for this level
                 // Lower diagonal
-                lower_diags(j,i-1) = a * device_delta_s(i-1, -1, grid.device_Delta_s) + 
+                local_lower(j,i-1) = a * device_delta_s(i-1, -1, grid.device_Delta_s) + 
                                     b * device_beta_s(i-1, -1, grid.device_Delta_s);
                 
                 // Main diagonal
-                main_diags(j,i) = a * device_delta_s(i-1, 0, grid.device_Delta_s) + 
+                local_main(j,i) = a * device_delta_s(i-1, 0, grid.device_Delta_s) + 
                                  b * device_beta_s(i-1, 0, grid.device_Delta_s) - 0.5 * r_d;
                 
                 // Upper diagonal
-                upper_diags(j,i) = a * device_delta_s(i-1, 1, grid.device_Delta_s) + 
+                local_upper(j,i) = a * device_delta_s(i-1, 1, grid.device_Delta_s) + 
                                   b * device_beta_s(i-1, 1, grid.device_Delta_s);
             }
-            
-            // Last entry in block
-            main_diags(j,m1) = -0.5 * r_d;
         }
+        */
+        
+        // Build tridiagonal system for this level
+        // Lower diagonal
+        local_lower(0,0) = sigma;
+
+        // Main diagonal
+        local_main(0,0) = rho;
+
+        // Upper diagonal
+        local_upper(0,0) = rho;
+
+
+        // Last entry in block
+        local_main(0,local_m1) = -0.5 * r_d;
     }
 
     // Build implicit system - callable from device
