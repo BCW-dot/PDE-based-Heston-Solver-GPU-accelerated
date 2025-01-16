@@ -568,82 +568,91 @@ void test_heston_A1() {
 */
 //A1 class test
 void test_heston_A1() {
-    {   // Create scope for Kokkos objects
-        int m1 = 5;
-        int m2 = 2;
-        Grid grid = create_test_grid(m1, m2);
-        
-        heston_A1Storage_gpu A1(m1, m2);
-        double rho = -0.9;
-        double sigma = 0.3;
-        double r_d = 0.025;
-        double r_f = 0.0;
+    int m1 = 300;
+    int m2 = 100;
+    Grid grid = create_test_grid(m1, m2);
+    
+    heston_A1Storage_gpu A1(m1, m2);
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double r_f = 0.0;
 
-        const double theta = 0.5;
-        const double delta_t = 0.05; 
-        
-        A1.build_matrix(grid, rho, sigma, r_d, r_f);
-        A1.build_implicit(theta, delta_t);
-        
-        // Get Views using getters
-        auto main = A1.get_main_diags();
-        auto lower = A1.get_lower_diags();
-        auto upper = A1.get_upper_diags();
+    const double theta = 0.5;
+    const double delta_t = 0.05; 
 
-        auto implicit_main = A1.get_implicit_main_diags();
-        auto implicit_lower = A1.get_implicit_lower_diags();
-        auto implicit_upper = A1.get_implicit_upper_diags();
+    using timer = std::chrono::high_resolution_clock;
+    
+    auto t_start = timer::now();
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    A1.build_implicit(theta, delta_t);
+    auto t_end = timer::now();
+    
+    std::cout << "Build matrix time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+    
+    // Get Views using getters
+    auto main = A1.get_main_diags();
+    auto lower = A1.get_lower_diags();
+    auto upper = A1.get_upper_diags();
 
-        // Create mirror views (fixed typo in Kokkos::)
-        auto main_host = Kokkos::create_mirror_view(main);
-        auto lower_host = Kokkos::create_mirror_view(lower);
-        auto upper_host = Kokkos::create_mirror_view(upper);
+    auto implicit_main = A1.get_implicit_main_diags();
+    auto implicit_lower = A1.get_implicit_lower_diags();
+    auto implicit_upper = A1.get_implicit_upper_diags();
 
-        auto implicit_main_host = Kokkos::create_mirror_view(implicit_main);
-        auto implicit_lower_host = Kokkos::create_mirror_view(implicit_lower);
-        auto implicit_upper_host = Kokkos::create_mirror_view(implicit_upper);
-        
-        // Copy to host
-        Kokkos::deep_copy(main_host, main);
-        Kokkos::deep_copy(lower_host, lower);
-        Kokkos::deep_copy(upper_host, upper);
+    // Create mirror views (fixed typo in Kokkos::)
+    auto main_host = Kokkos::create_mirror_view(main);
+    auto lower_host = Kokkos::create_mirror_view(lower);
+    auto upper_host = Kokkos::create_mirror_view(upper);
 
-        Kokkos::deep_copy(implicit_main_host, implicit_main);
-        Kokkos::deep_copy(implicit_lower_host, implicit_lower);
-        Kokkos::deep_copy(implicit_upper_host, implicit_upper);
-        
-        // Print matrices
-        std::cout << std::fixed << std::setprecision(6);
-        std::cout << "A1 Matrix Structure:\n";
-        std::cout << "--------------------\n";
-        
-        for(int j = 0; j <= m2; j++) {
-            std::cout << "\nVariance level j=" << j << ":\n";
-            std::cout << "Lower diagonal: ";
-            for(int i = 0; i < m1; i++) std::cout << lower_host(j,i) << " ";
-            std::cout << "\nMain diagonal:  ";
-            for(int i = 0; i <= m1; i++) std::cout << main_host(j,i) << " ";
-            std::cout << "\nUpper diagonal: ";
-            for(int i = 0; i < m1; i++) std::cout << upper_host(j,i) << " ";
-            std::cout << "\n";
+    auto implicit_main_host = Kokkos::create_mirror_view(implicit_main);
+    auto implicit_lower_host = Kokkos::create_mirror_view(implicit_lower);
+    auto implicit_upper_host = Kokkos::create_mirror_view(implicit_upper);
+    
+    // Copy to host
+    Kokkos::deep_copy(main_host, main);
+    Kokkos::deep_copy(lower_host, lower);
+    Kokkos::deep_copy(upper_host, upper);
 
-            std::cout << "Implicit diagonals:\n";
-            std::cout << "Lower diagonal: ";
-            for(int i = 0; i < m1; i++) std::cout << implicit_lower_host(j,i) << " ";
-            std::cout << "\nMain diagonal:  ";
-            for(int i = 0; i <= m1; i++) std::cout << implicit_main_host(j,i) << " ";
-            std::cout << "\nUpper diagonal: ";
-            for(int i = 0; i < m1; i++) std::cout << implicit_upper_host(j,i) << " ";
-            std::cout << "\n";
-            std::cout << "----------------------------------------\n";
+    Kokkos::deep_copy(implicit_main_host, implicit_main);
+    Kokkos::deep_copy(implicit_lower_host, implicit_lower);
+    Kokkos::deep_copy(implicit_upper_host, implicit_upper);
+    
+    // Print matrices
+    /*
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << "A1 Matrix Structure:\n";
+    std::cout << "--------------------\n";
+    
+    for(int j = 0; j <= m2; j++) {
+        std::cout << "\nVariance level j=" << j << ":\n";
+        std::cout << "Lower diagonal: ";
+        for(int i = 0; i < m1; i++) std::cout << lower_host(j,i) << " ";
+        std::cout << "\nMain diagonal:  ";
+        for(int i = 0; i <= m1; i++) std::cout << main_host(j,i) << " ";
+        std::cout << "\nUpper diagonal: ";
+        for(int i = 0; i < m1; i++) std::cout << upper_host(j,i) << " ";
+        std::cout << "\n";
 
-        }
+        std::cout << "Implicit diagonals:\n";
+        std::cout << "Lower diagonal: ";
+        for(int i = 0; i < m1; i++) std::cout << implicit_lower_host(j,i) << " ";
+        std::cout << "\nMain diagonal:  ";
+        for(int i = 0; i <= m1; i++) std::cout << implicit_main_host(j,i) << " ";
+        std::cout << "\nUpper diagonal: ";
+        for(int i = 0; i < m1; i++) std::cout << implicit_upper_host(j,i) << " ";
+        std::cout << "\n";
+        std::cout << "----------------------------------------\n";
 
-        // Print dimensions
-        std::cout << "\nDimensions:\n";
-        std::cout << "m1: " << A1.get_m1() << ", m2: " << A1.get_m2() << "\n";
-    }   // Scope ends here, Kokkos objects destroyed
-}
+    }
+    */
+
+    // Print dimensions
+    std::cout << "\nDimensions:\n";
+    std::cout << "m1: " << A1.get_m1() << ", m2: " << A1.get_m2() << "\n";
+}   
+
 
 //This test compare the explicit and implicit output of a simple test case vector. It is compared to the python implementation
 //and checked that the outputs align. This test was written when i saw oszillatory behavior in the m1 direction when increasing
@@ -1232,8 +1241,8 @@ void test_A1_multiply_and_implicit() {
     using timer = std::chrono::high_resolution_clock;
     
     // Test dimensions
-    const int m1 = 100;
-    const int m2 = 50;
+    const int m1 = 300;
+    const int m2 = 100;
     std::cout << "Testing A1 with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
 
     // Create grid
@@ -1927,10 +1936,10 @@ void test_hes_mat_fac() {
             std::cout << "Default execution space: " << Kokkos::DefaultExecutionSpace::name() << std::endl;
 
             //test_heston_A0();
-            test_heston_A1();
+            //test_heston_A1();
             //test_heston_A2();
 
-            //test_A1_structure();
+            test_A1_structure();
             
             //test_A0_multiply();
             //test_parallel_tridiagonal();

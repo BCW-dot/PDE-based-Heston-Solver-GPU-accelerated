@@ -4,6 +4,7 @@
 #include <iostream>
 #include "coeff.hpp"
 
+//runs on the cpu for testing
 /*
 KOKKOS_FUNCTION
 void build_a1_diagonals(
@@ -148,10 +149,119 @@ void build_a1_diagonals(
 }
 
 
+// "Class-free" multiply over variance (j) and stock (i).
+// Each team handles all i's for one or more j’s.
+//
+// - main_diag, lower_diag, upper_diag: shape (m2+1, m1+1) etc.
+// - x, result: shape ( (m2+1)*(m1+1) ) in 1D
+// - team: the Kokkos team handle.
+
+KOKKOS_FUNCTION
+void device_multiply_parallel_s_and_v(
+    const Kokkos::View<const double**>& main_diag,
+    const Kokkos::View<const double**>& lower_diag,
+    const Kokkos::View<const double**>& upper_diag,
+    const Kokkos::View<double*>& x,
+    const Kokkos::View<double*>& result,  // Changed to const
+    const Kokkos::TeamPolicy<>::member_type& team)
+{
+    // Infer matrix dimensions: 
+    //    m2 = number of variance lines - 1
+    //    m1 = number of stock points    - 1
+    // For example, if main_diag is shape [m2+1, m1+1],
+    // then main_diag.extent(0) = m2+1, main_diag.extent(1) = m1+1.
+
+    //maybe i can optimize this, by passing it into the function itself
+    const int m2 = main_diag.extent(0) - 1;
+    const int m1 = main_diag.extent(1) - 1;
+
+    // TeamThreadRange: parallelize over j in [0..m2].
+    Kokkos::parallel_for(
+        Kokkos::TeamThreadRange(team, m2 + 1),
+        [&](const int j)
+        {
+            // The row offset in the 1D vectors x/result
+            const int offset = j * (m1 + 1);
+
+            // Option A: Do a simple for-loop over i
+            for (int i = 0; i <= m1; i++) {
+                double sum = main_diag(j, i) * x(offset + i);
+
+                if (i > 0) {
+                    sum += lower_diag(j, i - 1) * x(offset + i - 1);
+                }
+                if (i < m1) {
+                    sum += upper_diag(j, i) * x(offset + i + 1);
+                }
+                result(offset + i) = sum;
+            }
+
+            // Option B: Another (often more GPU-friendly) approach is
+            // to add a nested parallel_for with ThreadVectorRange here:
+            //
+            // Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, m1 + 1),
+            //     [&](const int i) {
+            //         double sum = main_diag(j, i) * x(offset + i);
+            //         ...
+            //         result(offset + i) = sum;
+            //     });
+        });
+
+    // Barrier to ensure all threads in this team are done
+    team.team_barrier();
+}
+
+KOKKOS_FUNCTION
+void device_solve_implicit_parallel_v(
+    const Kokkos::View<const double**>& impl_main,
+    const Kokkos::View<const double**>& impl_lower,
+    const Kokkos::View<const double**>& impl_upper,
+    const Kokkos::View<double*>& x,         // Changed to const
+    const Kokkos::View<double**>& temp,     // Changed to const
+    const Kokkos::View<double*>& b,
+    const Kokkos::TeamPolicy<>::member_type& team)
+{
+    // Determine grid sizes
+    const int m2 = impl_main.extent(0) - 1;
+    const int m1 = impl_main.extent(1) - 1;
+
+    // Parallelize over j in [0..m2], each team handles one or more j's
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2 + 1),
+        [&](const int j)
+        {
+            // For each j, we do a forward and backward sweep in i
+            const int offset = j * (m1 + 1);
+
+            // Forward sweep
+            temp(j, 0) = impl_main(j, 0);
+            x(offset)  = b(offset);
+
+            for (int i = 1; i <= m1; i++) {
+                const double m = impl_lower(j, i - 1) / temp(j, i - 1);
+                temp(j, i) = impl_main(j, i) - m * impl_upper(j, i - 1);
+                x(offset + i) = b(offset + i) - m * x(offset + i - 1);
+            }
+
+            // Backward sweep
+            x(offset + m1) /= temp(j, m1);
+
+            for (int i = m1 - 1; i >= 0; i--) {
+                x(offset + i) = (x(offset + i)
+                                 - impl_upper(j, i) * x(offset + i + 1))
+                                / temp(j, i);
+            }
+        });
+
+    // Team-level barrier if subsequent code in the same kernel depends on the result
+    team.team_barrier();
+}
+
+//first test which prints out the Residual and the Diagonals as well as the implicict diagoanls
 void test_a1_build() {
+    using timer = std::chrono::high_resolution_clock;
     // Test dimensions
-    const int m1 = 5;  // Stock price points
-    const int m2 = 2;  // Variance points
+    const int m1 = 50;  // Stock price points
+    const int m2 = 25;  // Variance points
     
     // Create grid
     Grid grid = create_test_grid(m1, m2);
@@ -176,7 +286,11 @@ void test_a1_build() {
     using team_policy = Kokkos::TeamPolicy<>;
     using member_type = team_policy::member_type;
 
-    team_policy policy(1, Kokkos::AUTO);  // One team for testing
+    team_policy policy(1, Kokkos::AUTO);  // One team for testing, with Kokkos::Auto number of threads
+
+    //
+    auto t_start = timer::now();
+
     Kokkos::parallel_for("test_device_call", policy,
         KOKKOS_LAMBDA(const member_type& team) {
             build_a1_diagonals(
@@ -184,7 +298,115 @@ void test_a1_build() {
                 impl_main_diag, impl_lower_diag, impl_upper_diag,
                 grid, theta, dt, r_d, r_f,
                 team);
+    });
+    Kokkos::fence();
+
+    auto t_end = timer::now();
+    std::cout << "Build matrix time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+    
+    /*
+    
+    Testing multiply
+    
+    */
+    //building rhs and multiply vectors
+    const int total_size = (m1 + 1) * (m2 + 1);
+    Kokkos::View<double*> x("x", (m2+1)*(m1+1));
+    Kokkos::View<double*> b("b", (m2+1)*(m1+1));
+    Kokkos::View<double*> result("result", total_size);
+
+    auto h_b = Kokkos::create_mirror_view(b);
+    auto h_x = Kokkos::create_mirror_view(x);
+        for (int i = 0; i < total_size; ++i) {
+            h_b(i) = (double)std::rand() / RAND_MAX;
+            h_x(i) = (double)std::rand() / RAND_MAX;
+        }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(x, h_x);
+    Kokkos::deep_copy(result, 0.0);
+
+    t_start = timer::now();
+
+    auto x_tmp = x;  // Create non-const copy
+    auto result_tmp = result;
+
+    Kokkos::parallel_for("test_multiply", policy,
+        KOKKOS_LAMBDA(const member_type& team)
+        {
+            device_multiply_parallel_s_and_v(
+                main_diag, lower_diag, upper_diag,
+                x_tmp, 
+                result_tmp,  // input x, output result
+                team);
         });
+    // Usually it’s good to fence if you want to ensure timing or correctness:
+    Kokkos::fence();
+
+    t_end = timer::now();
+    std::cout << "Multiply matrix time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+
+    // Get results back to host
+    auto h_result = Kokkos::create_mirror_view(result);
+
+
+    /*
+    
+    Testing implcicit call
+    
+    */
+    // For 'temp', we definitely need to write into it:
+    Kokkos::View<double**> temp("temp", m2+1, m1+1);
+
+    auto temp_tmp = temp;
+    auto b_tmp = b;
+
+    t_start = timer::now();
+    Kokkos::parallel_for("test_implicit_solve", policy,
+        KOKKOS_LAMBDA(const member_type& team) {
+        device_solve_implicit_parallel_v(
+            impl_main_diag, impl_lower_diag, impl_upper_diag,
+            x_tmp, temp_tmp, b_tmp,  // Use the non-const copies
+            team);
+    }); 
+    Kokkos::fence();
+    t_end = timer::now();
+
+    // After implicit solve:
+    t_end = timer::now();
+    std::cout << "Implicit solve time: "
+            << std::chrono::duration<double>(t_end - t_start).count()
+            << " seconds" << std::endl;
+
+    // Need to do one more multiply to verify the solution
+    Kokkos::deep_copy(result, 0.0);  // Clear previous result
+    auto result_verify = result;
+    Kokkos::parallel_for("verify_implicit", policy,
+        KOKKOS_LAMBDA(const member_type& team)
+        {
+            device_multiply_parallel_s_and_v(
+                main_diag, lower_diag, upper_diag,
+                x_tmp, result_verify,
+                team);
+        });
+    Kokkos::fence();
+
+    // Get results and compute residual on host
+    Kokkos::deep_copy(h_x, x);
+    Kokkos::deep_copy(h_result, result);
+    Kokkos::deep_copy(h_b, b);
+
+    double implicit_residual = 0.0;
+    for(int i = 0; i < total_size; i++) {
+        double res = h_x(i) - theta * dt * h_result(i) - h_b(i);
+        implicit_residual += res * res;
+    }
+    implicit_residual = std::sqrt(implicit_residual);
+    std::cout << "Implicit solve residual norm: " << implicit_residual << std::endl;
+
 
     // Create host mirrors
     auto h_main = Kokkos::create_mirror_view(main_diag);
@@ -203,6 +425,7 @@ void test_a1_build() {
     Kokkos::deep_copy(h_impl_upper, impl_upper_diag);
 
     // Print results
+    /*
     std::cout << std::fixed << std::setprecision(6);
     
     for(int j = 0; j <= m2; j++) {
@@ -247,13 +470,179 @@ void test_a1_build() {
         std::cout << "\n";
         std::cout << "----------------------------------------\n";
     }
+    */
 }
+
+//This test compares the explicit and implicit output to the test in the A1 class. To make sure we are doing exactly the same
+void test_a1_structure_function() {
+    // Test dimensions - matching your test
+    int m1 = 4;  
+    int m2 = 3;
+    
+    Grid grid = create_test_grid(m1, m2);
+    
+    // Create Views for diagonals
+    Kokkos::View<double**> main_diag("main_diag", m2+1, m1+1);
+    Kokkos::View<double**> lower_diag("lower_diag", m2+1, m1);
+    Kokkos::View<double**> upper_diag("upper_diag", m2+1, m1);
+    
+    Kokkos::View<double**> impl_main_diag("impl_main_diag", m2+1, m1+1);
+    Kokkos::View<double**> impl_lower_diag("impl_lower_diag", m2+1, m1);
+    Kokkos::View<double**> impl_upper_diag("impl_upper_diag", m2+1, m1);
+    
+    // Same parameters as your test
+    double rho = -0.9;
+    double sigma = 0.3;
+    double r_d = 0.025;
+    double r_f = 0.0;
+    double theta = 0.8;
+    double delta_t = 1.0/20;
+
+    // Build matrices using team policy
+    using team_policy = Kokkos::TeamPolicy<>;
+    using member_type = team_policy::member_type;
+    team_policy policy(1, Kokkos::AUTO);
+
+    // Build the matrices
+    Kokkos::parallel_for("build_matrices", policy,
+        KOKKOS_LAMBDA(const member_type& team) {
+            build_a1_diagonals(
+                main_diag, lower_diag, upper_diag,
+                impl_main_diag, impl_lower_diag, impl_upper_diag,
+                grid, theta, delta_t, r_d, r_f,
+                team);
+    });
+    Kokkos::fence();
+
+    // Print matrix structure - matching your output format
+    const int total_size = (m1 + 1) * (m2 + 1);
+    std::cout << "\nA1 Matrix Structure (Function Version):";
+    std::cout << "\nShape: [" << total_size << ", " << total_size << "]" << std::endl;
+
+    auto h_main = Kokkos::create_mirror_view(main_diag);
+    auto h_lower = Kokkos::create_mirror_view(lower_diag);
+    auto h_upper = Kokkos::create_mirror_view(upper_diag);
+    
+    Kokkos::deep_copy(h_main, main_diag);
+    Kokkos::deep_copy(h_lower, lower_diag);
+    Kokkos::deep_copy(h_upper, upper_diag);
+
+    // Print block structure
+    for(int j = 0; j <= m2; j++) {
+        std::cout << "\nBlock j=" << j << ":" << std::endl;
+        
+        std::cout << "\n  Lower diagonal for block " << j << ":" << std::endl;
+        for(int i = 0; i < m1; i++) {
+            double val = h_lower(j,i);
+            if(std::abs(val) > 1e-10) {
+                std::cout << "    [" << i+1 << "," << i << "] = " 
+                         << std::fixed << std::setprecision(6) << val << std::endl;
+            }
+        }
+        
+        std::cout << "\n  Main diagonal for block " << j << ":" << std::endl;
+        for(int i = 0; i <= m1; i++) {
+            double val = h_main(j,i);
+            if(std::abs(val) > 1e-10) {
+                std::cout << "    [" << i << "," << i << "] = " 
+                         << std::fixed << std::setprecision(6) << val << std::endl;
+            }
+        }
+        
+        std::cout << "\n  Upper diagonal for block " << j << ":" << std::endl;
+        for(int i = 0; i < m1; i++) {
+            double val = h_upper(j,i);
+            if(std::abs(val) > 1e-10) {
+                std::cout << "    [" << i << "," << i+1 << "] = " 
+                         << std::fixed << std::setprecision(6) << val << std::endl;
+            }
+        }
+    }
+
+    // Create and initialize test vectors exactly as in your test
+    Kokkos::View<double*> x("x", total_size);
+    Kokkos::View<double*> b("b", total_size);
+    Kokkos::View<double*> result("result", total_size);
+    
+    auto h_x = Kokkos::create_mirror_view(x);
+    auto h_b = Kokkos::create_mirror_view(b);
+    
+    for(int i = 0; i < total_size; i++) {
+        h_x(i) = i + 1.0;
+        h_b(i) = total_size - i;
+    }
+    
+    std::cout << "\nTest vector x first 10 values:" << std::endl;
+    for(int i = 0; i < std::min(10, total_size); i++) {
+        std::cout << "x[" << i << "] = " << std::fixed 
+                 << std::setprecision(6) << h_x(i) << std::endl;
+    }
+    
+    std::cout << "\nTest vector b first 10 values:" << std::endl;
+    for(int i = 0; i < std::min(10, total_size); i++) {
+        std::cout << "b[" << i << "] = " << std::fixed 
+                 << std::setprecision(6) << h_b(i) << std::endl;
+    }
+    
+    Kokkos::deep_copy(x, h_x);
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(result, 0.0);
+
+    // Test multiply
+    auto x_tmp = x;
+    auto result_tmp = result;
+    
+    Kokkos::parallel_for("test_multiply", policy,
+        KOKKOS_LAMBDA(const member_type& team)
+        {
+            device_multiply_parallel_s_and_v(
+                main_diag, lower_diag, upper_diag,
+                x_tmp, result_tmp,
+                team);
+        });
+    Kokkos::fence();
+
+    auto h_result = Kokkos::create_mirror_view(result);
+    Kokkos::deep_copy(h_result, result);
+    
+    std::cout << "\nExplicit multiplication first 30 results:" << std::endl;
+    for(int i = 0; i < std::min(30, total_size); i++) {
+        std::cout << "result[" << i << "] = " << std::fixed 
+                 << std::setprecision(6) << h_result(i) << std::endl;
+    }
+
+    // Test implicit solve
+    Kokkos::View<double**> temp("temp", m2+1, m1+1);
+    auto temp_tmp = temp;
+    auto b_tmp = b;
+
+    Kokkos::parallel_for("test_implicit_solve", policy,
+        KOKKOS_LAMBDA(const member_type& team) {
+            device_solve_implicit_parallel_v(
+                impl_main_diag, impl_lower_diag, impl_upper_diag,
+                x_tmp, temp_tmp, b_tmp,
+                team);
+        });
+    Kokkos::fence();
+
+    auto h_implicit = Kokkos::create_mirror_view(x);
+    Kokkos::deep_copy(h_implicit, x);
+    
+    std::cout << "\nImplicit solve first 30 results:" << std::endl;
+    for(int i = 0; i < std::min(30, total_size); i++) {
+        std::cout << "implicit_result[" << i << "] = " << std::fixed 
+                 << std::setprecision(6) << h_implicit(i) << std::endl;
+    }
+}
+
+
 
 void test_a1_kernel(){
 Kokkos::initialize();
     {
         try{
-            test_a1_build();
+            //test_a1_build();
+            test_a1_structure_function();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;
