@@ -195,6 +195,10 @@ public:
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_main_diags() const { return main_diags; }
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_lower_diags() const { return lower_diags; }
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_upper_diags() const { return upper_diags; }
+
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_main_diags() const { return implicit_main_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_lower_diags() const { return implicit_lower_diags; }
+    KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_upper_diags() const { return implicit_upper_diags; }
 };
 
 // Multiply function - kept inline for performance

@@ -13,6 +13,7 @@
 
 #include "solver.hpp"
 
+#include "hes_a1_kernels.hpp"
 
 #include <iostream>
 
@@ -40,7 +41,14 @@ int main(int argc, char* argv[]) {
 
     //test_boundary_conditions();
 
-    test_DO_scheme();
+    //test_DO_scheme();
+
+    /*
+    
+    Here come the test for the class free implementation. WE need these for the calibration code
+
+    */
+    test_a1_kernel();
 
 
 

@@ -570,7 +570,7 @@ void test_heston_A1() {
 void test_heston_A1() {
     {   // Create scope for Kokkos objects
         int m1 = 5;
-        int m2 = 5;
+        int m2 = 2;
         Grid grid = create_test_grid(m1, m2);
         
         heston_A1Storage_gpu A1(m1, m2);
@@ -578,25 +578,42 @@ void test_heston_A1() {
         double sigma = 0.3;
         double r_d = 0.025;
         double r_f = 0.0;
+
+        const double theta = 0.5;
+        const double delta_t = 0.05; 
         
         A1.build_matrix(grid, rho, sigma, r_d, r_f);
+        A1.build_implicit(theta, delta_t);
         
         // Get Views using getters
         auto main = A1.get_main_diags();
         auto lower = A1.get_lower_diags();
         auto upper = A1.get_upper_diags();
 
+        auto implicit_main = A1.get_implicit_main_diags();
+        auto implicit_lower = A1.get_implicit_lower_diags();
+        auto implicit_upper = A1.get_implicit_upper_diags();
+
         // Create mirror views (fixed typo in Kokkos::)
         auto main_host = Kokkos::create_mirror_view(main);
         auto lower_host = Kokkos::create_mirror_view(lower);
         auto upper_host = Kokkos::create_mirror_view(upper);
+
+        auto implicit_main_host = Kokkos::create_mirror_view(implicit_main);
+        auto implicit_lower_host = Kokkos::create_mirror_view(implicit_lower);
+        auto implicit_upper_host = Kokkos::create_mirror_view(implicit_upper);
         
         // Copy to host
         Kokkos::deep_copy(main_host, main);
         Kokkos::deep_copy(lower_host, lower);
         Kokkos::deep_copy(upper_host, upper);
+
+        Kokkos::deep_copy(implicit_main_host, implicit_main);
+        Kokkos::deep_copy(implicit_lower_host, implicit_lower);
+        Kokkos::deep_copy(implicit_upper_host, implicit_upper);
         
         // Print matrices
+        std::cout << std::fixed << std::setprecision(6);
         std::cout << "A1 Matrix Structure:\n";
         std::cout << "--------------------\n";
         
@@ -609,6 +626,17 @@ void test_heston_A1() {
             std::cout << "\nUpper diagonal: ";
             for(int i = 0; i < m1; i++) std::cout << upper_host(j,i) << " ";
             std::cout << "\n";
+
+            std::cout << "Implicit diagonals:\n";
+            std::cout << "Lower diagonal: ";
+            for(int i = 0; i < m1; i++) std::cout << implicit_lower_host(j,i) << " ";
+            std::cout << "\nMain diagonal:  ";
+            for(int i = 0; i <= m1; i++) std::cout << implicit_main_host(j,i) << " ";
+            std::cout << "\nUpper diagonal: ";
+            for(int i = 0; i < m1; i++) std::cout << implicit_upper_host(j,i) << " ";
+            std::cout << "\n";
+            std::cout << "----------------------------------------\n";
+
         }
 
         // Print dimensions
@@ -1899,7 +1927,7 @@ void test_hes_mat_fac() {
             std::cout << "Default execution space: " << Kokkos::DefaultExecutionSpace::name() << std::endl;
 
             //test_heston_A0();
-            //test_heston_A1();
+            test_heston_A1();
             //test_heston_A2();
 
             //test_A1_structure();
@@ -1910,7 +1938,7 @@ void test_hes_mat_fac() {
             //test_A2_multiply_and_implicit();
 
             //test_A1_device_in_one_kernel();
-            test_device_callable();
+            //test_device_callable();
 
             //test_heston_A1_coalesc();
             //test_A1_multiply_and_implicit_coalesc();
