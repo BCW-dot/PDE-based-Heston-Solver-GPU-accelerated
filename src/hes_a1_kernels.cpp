@@ -156,6 +156,7 @@ void build_a1_diagonals(
 // - x, result: shape ( (m2+1)*(m1+1) ) in 1D
 // - team: the Kokkos team handle.
 
+//name is missleading, we are just parallising in v
 KOKKOS_FUNCTION
 void device_multiply_parallel_s_and_v(
     const Kokkos::View<const double**>& main_diag,
@@ -256,12 +257,13 @@ void device_solve_implicit_parallel_v(
     team.team_barrier();
 }
 
+
 //first test which prints out the Residual and the Diagonals as well as the implicict diagoanls
 void test_a1_build() {
     using timer = std::chrono::high_resolution_clock;
     // Test dimensions
-    const int m1 = 50;  // Stock price points
-    const int m2 = 25;  // Variance points
+    const int m1 = 100;  // Stock price points
+    const int m2 = 50;  // Variance points
     
     // Create grid
     Grid grid = create_test_grid(m1, m2);
@@ -276,8 +278,8 @@ void test_a1_build() {
     Kokkos::View<double**> impl_upper_diag("impl_upper_diag", m2+1, m1);
     
     // Test parameters
-    const double theta = 0.5;
-    const double dt = 0.05;
+    const double theta = 0.8;
+    const double dt = 1.0/14.0;
     const double r_d = 0.025;
     const double r_f = 0.0;
 
@@ -286,8 +288,8 @@ void test_a1_build() {
     using team_policy = Kokkos::TeamPolicy<>;
     using member_type = team_policy::member_type;
 
-    team_policy policy(1, Kokkos::AUTO);  // One team for testing, with Kokkos::Auto number of threads
-
+    team_policy policy(1, Kokkos::AUTO);  // One team for testing, with "Kokkos::Auto" number of threads
+    
     //
     auto t_start = timer::now();
 
@@ -641,8 +643,8 @@ void test_a1_kernel(){
 Kokkos::initialize();
     {
         try{
-            //test_a1_build();
-            test_a1_structure_function();
+            test_a1_build();
+            //test_a1_structure_function();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;

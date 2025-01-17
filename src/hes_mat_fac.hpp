@@ -228,6 +228,7 @@ inline void heston_A1Storage_gpu::multiply(const Kokkos::View<double*>& x, Kokko
     Kokkos::fence();
 }
 
+//this did not yield any faster improvement over the parallisation in v
 inline void heston_A1Storage_gpu::multiply_parallel_s_and_v(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
     const int local_m1 = m1;
     const int local_m2 = m2;
@@ -350,7 +351,7 @@ calibration process where we fill the Jacobianmatrix J in parallel. Each entry i
 call the methods like A1.explicit() in parallel
 
 */
-
+/*
 class heston_A1_device {
 private:
     int m1, m2;
@@ -399,7 +400,7 @@ public:
         const auto local_upper = upper_diags;
         
         // Loop over variance levels
-        /*
+        
         for(int j = 0; j <= local_m2; j++) {
             // Interior points
             for(int i = 1; i < local_m1; i++) {
@@ -421,7 +422,7 @@ public:
                                   b * device_beta_s(i-1, 1, grid.device_Delta_s);
             }
         }
-        */
+        
         
         // Build tridiagonal system for this level
         // Lower diagonal
@@ -525,7 +526,7 @@ inline void heston_A1_device::solve_implicit_device(Kokkos::View<double*>& x, co
     });
     Kokkos::fence();
 }
-
+*/
 /*
 
 A2 class moved to an individual .hpp (hes_A2_mat) file for debgugging. There was an indexing error
@@ -701,7 +702,7 @@ at all. This lead me to believe we should implement the A1 matrix with just rhee
 not try to optimize memory allocation by the block structure
 
 */
-
+/*
 class heston_A1Storage_coalesc {
 private:
     int m1, m2;
@@ -910,14 +911,14 @@ public:
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_upper_diags() const { return upper_diags; }
 
 };
-
+*/
 /*
 
 This is the "basic" idea of the A1 class where we just store it as three diagonasl and use one
 thread to solve the impolicit system. 
 
 */
-
+/*
 class heston_A1_flat {
 private:
     int m1, m2;  // Grid dimensions
@@ -1184,7 +1185,7 @@ public:
                 << std::chrono::duration<double>(t_end - t_start).count()
                 << " seconds\n";
     }
-    */
+    
 
     // Getters
     KOKKOS_INLINE_FUNCTION int get_m1() const { return m1; }
@@ -1194,6 +1195,6 @@ public:
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_lower_diag() const { return lower_diag; }
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_upper_diag() const { return upper_diag; }
 };
-
+*/
 
 void test_hes_mat_fac();

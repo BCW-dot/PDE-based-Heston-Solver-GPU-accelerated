@@ -1254,6 +1254,10 @@ void test_A1_multiply_and_implicit() {
     double sigma = 0.3;
     double r_d = 0.025;
     double r_f = 0.0;
+
+    double theta = 0.8;
+    double delta_t = 1.0/14;
+
     A1.build_matrix(grid, rho, sigma, r_d, r_f);
 
     // After building A1
@@ -1284,14 +1288,12 @@ void test_A1_multiply_and_implicit() {
     Kokkos::deep_copy(x, h_x);
 
     // Build implicit matrix
-    double theta = 0.8;
-    double delta_t = 1.0/14;
     A1.build_implicit(theta, delta_t);
 
     
     // Test multiply
     auto t_start = timer::now();
-    A1.multiply(x, result);
+    A1.multiply_parallel_s_and_v(x, result);
     auto t_end = timer::now();
     
     std::cout << "Multiply time: "
@@ -1430,7 +1432,7 @@ One fix is to rwrite the class and making it "Easily copyable" or to write the e
 very very tricky)
 
 */
-
+/*
 void test_A1_device_in_one_kernel() {
     
     // Test dimensions
@@ -1489,12 +1491,13 @@ void test_A1_device_in_one_kernel() {
     // Print dimensions
     std::cout << "\nDimensions:\n";
     std::cout << "m1: " << A1_dev_ptr->get_m1() << ", m2: " << A1_dev_ptr->get_m2() << "\n";
-    */
+    
 }
-
+*/
 
 // DeviceCallable.hpp
 // Simple test to make the class device idea working. It isnt working
+/*
 #pragma once
 #include <Kokkos_Core.hpp>
 
@@ -1596,7 +1599,7 @@ void test_device_callable() {
             }
 
 }
-
+*/
 
 
 /*
@@ -1611,7 +1614,7 @@ not get any speedups compared to our initial 2D data layout. Both take the same 
 This is the coalesc A1 test
 
 */
-
+/*
 // Basic structure test
 void test_heston_A1_coalesc() {
     {   // Create scope for Kokkos objects
@@ -1739,7 +1742,7 @@ void test_A1_multiply_and_implicit_coalesc() {
     std::cout << "Parallel multiply time: "
               << std::chrono::duration<double>(t_end_parallel - t_start).count()
               << " seconds" << std::endl;
-    */
+    
     // Test implicit solve
     for(int i=0; i<5; i++){
         auto t_start = timer::now();
@@ -1769,8 +1772,9 @@ void test_A1_multiply_and_implicit_coalesc() {
     residual = std::sqrt(residual);
     
     std::cout << "Residual norm: " << residual << std::endl;
-    */
+    
 }
+*/
 
 /*
 
@@ -1779,6 +1783,7 @@ This is the basic A1 test with just three diagonasl
 */
 
 // Basic structure test and performance test for flat storage A1 implementation
+/*
 void test_heston_A1_flat() {
     {   // Create scope for Kokkos objects
         int m1 = 5;
@@ -1926,7 +1931,7 @@ void test_A1_flat_performance() {
     
     std::cout << "Total residual norm: " << residual << "\n";
 }
-
+*/
 
 void test_hes_mat_fac() {
     // Initialize Kokkos
@@ -1939,11 +1944,11 @@ void test_hes_mat_fac() {
             //test_heston_A1();
             //test_heston_A2();
 
-            test_A1_structure();
+            //test_A1_structure();
             
             //test_A0_multiply();
             //test_parallel_tridiagonal();
-            //test_A1_multiply_and_implicit();
+            test_A1_multiply_and_implicit();
             //test_A2_multiply_and_implicit();
 
             //test_A1_device_in_one_kernel();
