@@ -640,8 +640,9 @@ void test_heston_A2_shuffled() {
 
 /*
 
-This is my own oenta diagonal solver and it works!!!
-I developed it on the cpu for debugging puposes and am using  it now in the A2_shuffled scheme
+This is my own penta diagonal solver and it works!!!
+I developed it on the cpu for debugging purposes and am using it now in the A2_shuffled scheme. This way 
+we dont get oszillation in the variance direction
 
 */
 #include <random>
@@ -996,6 +997,7 @@ void debug_A2_implementations() {
 
     // Print original vector layout
     std::cout << "Original vector layout (by variance levels):\n";
+    /*
     for (int j = 0; j <= m2; j++) {
         std::cout << "v" << j << ": ";
         for (int i = 0; i <= m1; i++) {
@@ -1003,6 +1005,7 @@ void debug_A2_implementations() {
         }
         std::cout << "\n";
     }
+    */
 
     // Shuffle input
     shuffle_vector(x, x_shuffled, m1, m2);
@@ -1010,6 +1013,7 @@ void debug_A2_implementations() {
     // Print shuffled vector layout
     auto h_x_shuffled = Kokkos::create_mirror_view(x_shuffled);
     Kokkos::deep_copy(h_x_shuffled, x_shuffled);
+    /*
     std::cout << "\nShuffled vector layout (by stock prices):\n";
     for (int i = 0; i <= m1; i++) {
         std::cout << "s" << i << ": ";
@@ -1018,6 +1022,7 @@ void debug_A2_implementations() {
         }
         std::cout << "\n";
     }
+    */
 
     // Test multiplication
     std::cout << "\nTesting multiplication:\n";
@@ -1038,7 +1043,7 @@ void debug_A2_implementations() {
         std::cout << h_result_orig(i) << " ";
     }
     std::cout << "\n\nShuffled multiplication results (first block):\n";
-    for(int i = 0; i <= m1; i++) {
+    for(int i = 0; i <= total_size; i++) {
         std::cout << h_result_unshuf(i) << " ";
     }
     std::cout << "\n";
@@ -1082,7 +1087,7 @@ void debug_A2_implementations() {
         std::cout << h_x_orig(i) << " ";
     }
     std::cout << "\n\nShuffled solve results (first block):\n";
-    for(int i = 0; i <= m1; i++) {
+    for(int i = 0; i <= total_size; i++) {
         std::cout << h_x_unshuf(i) << " ";
     }
     std::cout << "\n";
@@ -1099,11 +1104,11 @@ void debug_A2_implementations() {
     }
 }
 
-//This prints out the numerical values
+//This prints out the numerical values of the matrices
 void compare_A2_matrices() {
     // Use same small dimensions
-    const int m1 = 10;
-    const int m2 = 10;
+    const int m1 = 2;
+    const int m2 = 14;
     
     Grid grid = create_test_grid(m1, m2);
     const double rho = -0.9;
@@ -1161,6 +1166,7 @@ void compare_A2_matrices() {
     
     // First compare j=0 block (special case)
     std::cout << "\nj=0 Block Comparison:\n";
+    /*
     std::cout << "Original A2:\n";
     std::cout << "main:   ";
     for(int i = 0; i <= m1; i++) {
@@ -1174,9 +1180,18 @@ void compare_A2_matrices() {
     for(int i = 0; i < m1+1; i++) {
         std::cout << h_orig_upper2(i) << " ";
     }
+    */
     
     std::cout << "\n\nShuffled A2 (first stock price block):\n";
-    std::cout << "main:   ";
+    std::cout << "\nlower2:  ";
+    for(int j = 0; j < m2-1; j++) {
+        std::cout << h_shuf_lower2(0,j) << " ";
+    }
+    std::cout << "\nlower: ";
+    for(int j = 0; j < m2; j++) {
+        std::cout << h_shuf_lower(0,j) << " ";
+    }
+    std::cout << "\nmain:   ";
     for(int j = 0; j <= m2; j++) {
         std::cout << h_shuf_main(0,j) << " ";
     }
@@ -1191,6 +1206,7 @@ void compare_A2_matrices() {
     
     // Now look at a middle block (j=1)
     std::cout << "\n\nj=1 Block Comparison:\n";
+    /*
     std::cout << "Original A2:\n";
     const int block_size = m1 + 1;
     std::cout << "lower:  ";
@@ -1205,7 +1221,7 @@ void compare_A2_matrices() {
     for(int i = 0; i < block_size - 1; i++) {
         std::cout << h_orig_upper(block_size + i) << " ";
     }
-    
+    */
     std::cout << "\n\nShuffled A2 (second stock price block):\n";
     std::cout << "lower2: ";
     for(int j = 0; j < m2-1; j++) {
@@ -1252,6 +1268,7 @@ void compare_A2_matrices() {
     
     // Print first block of implicit system
     std::cout << "\n\nImplicit System j=0 Block:\n";
+    /*
     std::cout << "Original A2:\n";
     std::cout << "main:   ";
     for(int i = 0; i <= m1; i++) {
@@ -1265,15 +1282,67 @@ void compare_A2_matrices() {
     for(int i = 0; i < m1+1; i++) {
         std::cout << h_orig_impl_upper2(i) << " ";
     }
-    
+    */
     auto shuf_impl_main = A2_shuffled.get_implicit_main_diags();
+    auto shuf_impl_lower = A2_shuffled.get_implicit_lower_diags();
+    auto shuf_impl_lower2 = A2_shuffled.get_implicit_lower2_diags();
+    auto shuf_impl_upper = A2_shuffled.get_implicit_upper_diags();
+    auto shuf_impl_upper2 = A2_shuffled.get_implicit_upper2_diags();
+
     auto h_shuf_impl_main = Kokkos::create_mirror_view(shuf_impl_main);
+    auto h_shuf_impl_lower = Kokkos::create_mirror_view(shuf_impl_lower);
+    auto h_shuf_impl_lower2 = Kokkos::create_mirror_view(shuf_impl_lower2);
+    auto h_shuf_impl_upper = Kokkos::create_mirror_view(shuf_impl_upper);
+    auto h_shuf_impl_upper2 = Kokkos::create_mirror_view(shuf_impl_upper2);
+
     Kokkos::deep_copy(h_shuf_impl_main, shuf_impl_main);
-    
+    Kokkos::deep_copy(h_shuf_impl_lower, shuf_impl_lower);
+    Kokkos::deep_copy(h_shuf_impl_lower2, shuf_impl_lower2);
+    Kokkos::deep_copy(h_shuf_impl_upper, shuf_impl_upper);
+    Kokkos::deep_copy(h_shuf_impl_upper2, shuf_impl_upper2);
+
     std::cout << "\n\nShuffled A2 Implicit (first stock price block):\n";
-    std::cout << "main:   ";
+    std::cout << "lower2: ";
+    for(int j = 0; j < m2-1; j++) {
+        std::cout << h_shuf_impl_lower2(0,j) << " ";
+    }
+    std::cout << "\nlower:  ";
+    for(int j = 0; j < m2; j++) {
+        std::cout << h_shuf_impl_lower(0,j) << " ";
+    }
+    std::cout << "\nmain:   ";
     for(int j = 0; j <= m2; j++) {
         std::cout << h_shuf_impl_main(0,j) << " ";
+    }
+    std::cout << "\nupper:  ";
+    for(int j = 0; j < m2; j++) {
+        std::cout << h_shuf_impl_upper(0,j) << " ";
+    }
+    std::cout << "\nupper2: ";
+    for(int j = 0; j < m2-1; j++) {
+        std::cout << h_shuf_impl_upper2(0,j) << " ";
+    }
+    
+    std::cout << "\n\nShuffled A2 Implicit (first stock price block):\n";
+    std::cout << "lower2: ";
+    for(int j = 0; j < m2-1; j++) {
+        std::cout << h_shuf_impl_lower2(1,j) << " ";
+    }
+    std::cout << "\nlower:  ";
+    for(int j = 0; j < m2; j++) {
+        std::cout << h_shuf_impl_lower(1,j) << " ";
+    }
+    std::cout << "\nmain:   ";
+    for(int j = 0; j <= m2; j++) {
+        std::cout << h_shuf_impl_main(1,j) << " ";
+    }
+    std::cout << "\nupper:  ";
+    for(int j = 0; j < m2; j++) {
+        std::cout << h_shuf_impl_upper(1,j) << " ";
+    }
+    std::cout << "\nupper2: ";
+    for(int j = 0; j < m2-1; j++) {
+        std::cout << h_shuf_impl_upper2(1,j) << " ";
     }
 }
 
