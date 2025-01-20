@@ -1941,13 +1941,13 @@ void test_hes_mat_fac() {
         try {
             std::cout << "Default execution space: " << Kokkos::DefaultExecutionSpace::name() << std::endl;
 
-            //test_heston_A0();
+            test_heston_A0();
             //test_heston_A1();
             //test_heston_A2();
 
             //test_A1_structure();
             
-            test_A0_multiply();
+            //test_A0_multiply();
             //test_parallel_tridiagonal();
             //test_A1_multiply_and_implicit();
             //test_A2_multiply_and_implicit();

@@ -15,7 +15,8 @@ void build_a0_values(
     const int m2 = grid.device_Vec_v.extent(0) - 1;
 
     // First set all values to zero
-    //needs to be optimized
+    //can be ommited
+    /*
     Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2-1), 
         [&](const int j) {
             Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, (m1-1)*9),
@@ -24,6 +25,7 @@ void build_a0_values(
                 });
     });
     team.team_barrier();
+    */
 
     // Fill in non-zero values
     Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2-1),
@@ -66,6 +68,8 @@ void device_multiply_a0(
             result(i) = 0.0;
     });
     team.team_barrier();
+    
+    //Kokkos::deep_copy(result,0.0);
 
     // Main computation - only fill in non-zero blocks
     Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2-1),
@@ -135,7 +139,6 @@ void test_a0_build() {
     Print matrix values
 
     */
-    /*
     // Get host copy of values
     auto h_values = Kokkos::create_mirror_view(values);
     Kokkos::deep_copy(h_values, values);
@@ -161,7 +164,7 @@ void test_a0_build() {
         }
         std::cout << "...\n";
     }
-    */
+    
     // Create test vectors
     const int total_size = (m1 + 1) * (m2 + 1);
     Kokkos::View<double*> x("x", total_size);
@@ -197,11 +200,13 @@ void test_a0_build() {
     Kokkos::deep_copy(h_result, result);
 
     // Print first few results
+    /*
     std::cout << "\nFirst 20 multiplication results:" << std::endl;
     for(int i = 0; i < std::min(50, total_size); i++) {
         std::cout << "result[" << i << "] = " << std::fixed 
                  << std::setprecision(6) << h_result(i) << " ";
     }
+    */
 }
 
 void test_a0_kernel(){

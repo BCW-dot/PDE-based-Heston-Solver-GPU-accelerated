@@ -217,7 +217,7 @@ void device_solve_implicit_parallel_v(
     const Kokkos::View<const double**>& impl_main,
     const Kokkos::View<const double**>& impl_lower,
     const Kokkos::View<const double**>& impl_upper,
-    const Kokkos::View<double*>& x,         // Changed to const
+    const Kokkos::View<double*>& x,         // Changed to const -> means that the memory address will not be changed, but the values can be modified
     const Kokkos::View<double**>& temp,     // Changed to const
     const Kokkos::View<double*>& b,
     const Kokkos::TeamPolicy<>::member_type& team)
@@ -331,19 +331,18 @@ void test_a1_build() {
 
     t_start = timer::now();
 
-    auto x_tmp = x;  // Create non-const copy
-    auto result_tmp = result;
+    //auto x_tmp = x;  // Create non-const copy
+    //auto result_tmp = result;
 
     Kokkos::parallel_for("test_multiply", policy,
         KOKKOS_LAMBDA(const member_type& team)
         {
             device_multiply_parallel_s_and_v(
                 main_diag, lower_diag, upper_diag,
-                x_tmp, 
-                result_tmp,  // input x, output result
+                x, 
+                result,  // input x, output result
                 team);
         });
-    // Usually it’s good to fence if you want to ensure timing or correctness:
     Kokkos::fence();
 
     t_end = timer::now();
@@ -363,15 +362,15 @@ void test_a1_build() {
     // For 'temp', we definitely need to write into it:
     Kokkos::View<double**> temp("temp", m2+1, m1+1);
 
-    auto temp_tmp = temp;
-    auto b_tmp = b;
+    //auto temp_tmp = temp;
+    //auto b_tmp = b;
 
     t_start = timer::now();
     Kokkos::parallel_for("test_implicit_solve", policy,
         KOKKOS_LAMBDA(const member_type& team) {
         device_solve_implicit_parallel_v(
             impl_main_diag, impl_lower_diag, impl_upper_diag,
-            x_tmp, temp_tmp, b_tmp,  // Use the non-const copies
+            x, temp, b,  // Use the non-const copies
             team);
     }); 
     Kokkos::fence();
@@ -385,13 +384,13 @@ void test_a1_build() {
 
     // Need to do one more multiply to verify the solution
     Kokkos::deep_copy(result, 0.0);  // Clear previous result
-    auto result_verify = result;
+    //auto result_verify = result;
     Kokkos::parallel_for("verify_implicit", policy,
         KOKKOS_LAMBDA(const member_type& team)
         {
             device_multiply_parallel_s_and_v(
                 main_diag, lower_diag, upper_diag,
-                x_tmp, result_verify,
+                x, result,
                 team);
         });
     Kokkos::fence();
@@ -591,15 +590,15 @@ void test_a1_structure_function() {
     Kokkos::deep_copy(result, 0.0);
 
     // Test multiply
-    auto x_tmp = x;
-    auto result_tmp = result;
+    //auto x_tmp = x;
+    //auto result_tmp = result;
     
     Kokkos::parallel_for("test_multiply", policy,
         KOKKOS_LAMBDA(const member_type& team)
         {
             device_multiply_parallel_s_and_v(
                 main_diag, lower_diag, upper_diag,
-                x_tmp, result_tmp,
+                x, result,
                 team);
         });
     Kokkos::fence();
@@ -615,14 +614,14 @@ void test_a1_structure_function() {
 
     // Test implicit solve
     Kokkos::View<double**> temp("temp", m2+1, m1+1);
-    auto temp_tmp = temp;
-    auto b_tmp = b;
+    //auto temp_tmp = temp;
+    //auto b_tmp = b;
 
     Kokkos::parallel_for("test_implicit_solve", policy,
         KOKKOS_LAMBDA(const member_type& team) {
             device_solve_implicit_parallel_v(
                 impl_main_diag, impl_lower_diag, impl_upper_diag,
-                x_tmp, temp_tmp, b_tmp,
+                x, temp, b,
                 team);
         });
     Kokkos::fence();
@@ -643,8 +642,8 @@ void test_a1_kernel(){
 Kokkos::initialize();
     {
         try{
-            test_a1_build();
-            //test_a1_structure_function();
+            //test_a1_build();
+            test_a1_structure_function();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;

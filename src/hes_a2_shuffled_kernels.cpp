@@ -348,8 +348,8 @@ void test_a2_build() {
     Kokkos::deep_copy(x, h_x);
     Kokkos::deep_copy(result, 0.0);
 
-    auto x_tmp = x;  // Create non-const copy
-    auto result_tmp = result;
+    //auto x_tmp = x;  // Create non-const copy
+    //auto result_tmp = result;
 
     // Test multiply
     t_start = timer::now();
@@ -358,7 +358,7 @@ void test_a2_build() {
         KOKKOS_LAMBDA(const member_type& team) {
             device_multiply_shuffled(
                 main_diag, lower_diag, lower2_diag, upper_diag, upper2_diag,
-                x_tmp, result_tmp,
+                x, result,
                 team);
     });
     Kokkos::fence();
@@ -490,11 +490,11 @@ void test_a2_shuffled_structure_function() {
     }
     */
 
-    auto x_shuffled_tmp = x_shuffled;
+    //auto x_shuffled_tmp = x_shuffled;
     // Shuffle input
     Kokkos::parallel_for("shuffle", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_shuffle_vector(x, x_shuffled_tmp, m1, m2, team);
+            device_shuffle_vector(x, x_shuffled, m1, m2, team);
     });
     Kokkos::fence();
     
@@ -523,11 +523,11 @@ void test_a2_shuffled_structure_function() {
     });
     Kokkos::fence();
 
-    auto result_unshuf_tmp = result_unshuf;
+    //auto result_unshuf_tmp = result_unshuf;
     // Unshuffle result for comparison
     Kokkos::parallel_for("unshuffle", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_unshuffle_vector(result, result_unshuf_tmp, m1, m2, team);
+            device_unshuffle_vector(result, result_unshuf, m1, m2, team);
     });
     Kokkos::fence();
 
@@ -583,10 +583,10 @@ void test_a2_shuffled_structure_function() {
 
     // Compare solve results
     Kokkos::View<double*> x_unshuf("x_unshuf", total_size);
-    auto x_unshuf_tmp = x_unshuf;
+    //auto x_unshuf_tmp = x_unshuf;
     Kokkos::parallel_for("unshuffle_x", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_unshuffle_vector(x_shuffled, x_unshuf_tmp, m1, m2, team);
+            device_unshuffle_vector(x_shuffled, x_unshuf, m1, m2, team);
     });
     Kokkos::fence();
 
@@ -783,9 +783,9 @@ void test_a2_shuffled_kernel(){
     Kokkos::initialize();
         {
             try{
-                test_a2_build();
+                //test_a2_build();
                 //test_a2_shuffled_structure_function();
-                //compare_a2_diagonal_kernels();
+                compare_a2_diagonal_kernels();
             }
             catch (std::exception& e) {
                 std::cout << "Error: " << e.what() << std::endl;
