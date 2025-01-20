@@ -783,9 +783,9 @@ void test_a2_shuffled_kernel(){
     Kokkos::initialize();
         {
             try{
-                //test_a2_build();
+                test_a2_build();
                 //test_a2_shuffled_structure_function();
-                compare_a2_diagonal_kernels();
+                //compare_a2_diagonal_kernels();
             }
             catch (std::exception& e) {
                 std::cout << "Error: " << e.what() << std::endl;

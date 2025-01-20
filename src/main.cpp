@@ -50,8 +50,8 @@ int main(int argc, char* argv[]) {
     Here come the test for the class free implementation. WE need these for the calibration code
 
     */
-    //test_a1_kernel();
-    test_a2_shuffled_kernel();
+    test_a1_kernel();
+    //test_a2_shuffled_kernel();
     //test_a0_kernel();
 
 

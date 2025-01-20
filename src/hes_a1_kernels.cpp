@@ -76,6 +76,9 @@ void build_a1_diagonals(
 }
 */
 
+
+//storage
+/*
 KOKKOS_FUNCTION
 void build_a1_diagonals(
     const Kokkos::View<double**>& main_diag,
@@ -89,8 +92,47 @@ void build_a1_diagonals(
     const double dt,
     const double r_d,
     const double r_f,
+    const Kokkos::TeamPolicy<>::member_type& team)
+
+    KOKKOS_FUNCTION
+void device_multiply_parallel_s_and_v(
+    const Kokkos::View<const double**>& main_diag,
+    const Kokkos::View<const double**>& lower_diag,
+    const Kokkos::View<const double**>& upper_diag,
+    const Kokkos::View<double*>& x,
+    const Kokkos::View<double*>& result,  // Changed to const
+    const Kokkos::TeamPolicy<>::member_type& team)
+
+    KOKKOS_FUNCTION
+void device_solve_implicit_parallel_v(
+    const Kokkos::View<const double**>& impl_main,
+    const Kokkos::View<const double**>& impl_lower,
+    const Kokkos::View<const double**>& impl_upper,
+    const Kokkos::View<double*>& x,         // Changed to const -> means that the memory address will not be changed, but the values can be modified
+    const Kokkos::View<double**>& temp,     // Changed to const
+    const Kokkos::View<double*>& b,
+    const Kokkos::TeamPolicy<>::member_type& team)
+
+*/
+
+template <class MDView, class LDView, class UDView,
+          class IMDView, class ILDView, class IUDView>
+KOKKOS_FUNCTION
+void build_a1_diagonals(
+    const MDView& main_diag,
+    const LDView& lower_diag,
+    const UDView& upper_diag,
+    const IMDView& impl_main_diag,
+    const ILDView& impl_lower_diag,
+    const IUDView& impl_upper_diag,
+    const Grid& grid,
+    const double theta,
+    const double dt,
+    const double r_d,
+    const double r_f,
     const Kokkos::TeamPolicy<>::member_type& team)  // Add team parameter
-{
+{   
+    
     // Get dimensions
     const int m1 = main_diag.extent(1) - 1;
     const int m2 = main_diag.extent(0) - 1;
@@ -98,6 +140,7 @@ void build_a1_diagonals(
     // Parallel over variance levels using team
     Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2 + 1), 
         [&](const int j) {
+            
             // First point (i=0) is boundary
             main_diag(j,0) = 0.0;
             impl_main_diag(j,0) = 1.0;
@@ -105,7 +148,7 @@ void build_a1_diagonals(
                 upper_diag(j,0) = 0.0;
                 impl_upper_diag(j,0) = 0.0;
             }
-
+            
             // Interior points
             for(int i = 1; i < m1; i++) {
                 // Compute PDE coefficients
@@ -122,6 +165,7 @@ void build_a1_diagonals(
 
                 // Build tridiagonal system for this level
                 // Lower diagonal
+                /*
                 lower_diag(j,i-1) = a * device_delta_s(i-1, -1, grid.device_Delta_s) + 
                                     b * device_beta_s(i-1, -1, grid.device_Delta_s);
                 
@@ -132,38 +176,52 @@ void build_a1_diagonals(
                 // Upper diagonal
                 upper_diag(j,i) = a * device_delta_s(i-1, 1, grid.device_Delta_s) + 
                                     b * device_beta_s(i-1, 1, grid.device_Delta_s);
+                */
+                
+                lower_diag(j,i-1) = s;//device_delta_s(i-1, -1, grid.device_Delta_s);
+                      
+                
+                // Main diagonal
+               main_diag(j,i) = 2;//a * device_delta_s(i-1, 0, grid.device_Delta_s) + 
+                                   // b * device_beta_s(i-1, 0, grid.device_Delta_s) - 0.5 * r_d;
+                
+                // Upper diagonal
+                upper_diag(j,i) = -1;//a * device_delta_s(i-1, 1, grid.device_Delta_s) + 
+                                    //b * device_beta_s(i-1, 1, grid.device_Delta_s);
 
                 // Build implicit diagonals: (I - theta*dt*A)
                 impl_lower_diag(j,i-1) = -theta * dt * lower_diag(j,i-1);
                 impl_main_diag(j,i) = 1.0 - theta * dt * main_diag(j,i);
                 impl_upper_diag(j,i) = -theta * dt * upper_diag(j,i);
             }
-
+            
             // Last point (i=m1)
             main_diag(j,m1) = -0.5 * r_d;
             impl_main_diag(j,m1) = 1.0 - theta * dt * main_diag(j,m1);
             lower_diag(j,m1-1) = 0.0;
             impl_lower_diag(j,m1-1) = 0.0;
+            
         });
     team.team_barrier();
 }
 
 
-// "Class-free" multiply over variance (j) and stock (i).
-// Each team handles all i's for one or more j’s.
-//
-// - main_diag, lower_diag, upper_diag: shape (m2+1, m1+1) etc.
-// - x, result: shape ( (m2+1)*(m1+1) ) in 1D
-// - team: the Kokkos team handle.
 
 //name is missleading, we are just parallising in v
+template<
+    class View2D_const_main,  // e.g. Kokkos::View<const double**, LayoutStride, ...>
+    class View2D_const_lower,
+    class View2D_const_upper,
+    class View1D_x,           // e.g. Kokkos::View<double*, ...>
+    class View1D_result
+>
 KOKKOS_FUNCTION
 void device_multiply_parallel_s_and_v(
-    const Kokkos::View<const double**>& main_diag,
-    const Kokkos::View<const double**>& lower_diag,
-    const Kokkos::View<const double**>& upper_diag,
-    const Kokkos::View<double*>& x,
-    const Kokkos::View<double*>& result,  // Changed to const
+    const View2D_const_main&  main_diag,
+    const View2D_const_lower& lower_diag,
+    const View2D_const_upper& upper_diag,
+    const View1D_x&           x,
+    const View1D_result&      result,
     const Kokkos::TeamPolicy<>::member_type& team)
 {
     // Infer matrix dimensions: 
@@ -212,14 +270,24 @@ void device_multiply_parallel_s_and_v(
     team.team_barrier();
 }
 
+
+
+template<
+    class View2D_const_main,
+    class View2D_const_lower,
+    class View2D_const_upper,
+    class View1D_x,     // x is 1D
+    class View2D_temp,  // temp is rank-2
+    class View1D_b
+>
 KOKKOS_FUNCTION
 void device_solve_implicit_parallel_v(
-    const Kokkos::View<const double**>& impl_main,
-    const Kokkos::View<const double**>& impl_lower,
-    const Kokkos::View<const double**>& impl_upper,
-    const Kokkos::View<double*>& x,         // Changed to const -> means that the memory address will not be changed, but the values can be modified
-    const Kokkos::View<double**>& temp,     // Changed to const
-    const Kokkos::View<double*>& b,
+    const View2D_const_main&  impl_main,
+    const View2D_const_lower& impl_lower,
+    const View2D_const_upper& impl_upper,
+    const View1D_x&           x,
+    const View2D_temp&        temp,
+    const View1D_b&           b,
     const Kokkos::TeamPolicy<>::member_type& team)
 {
     // Determine grid sizes
@@ -262,8 +330,8 @@ void device_solve_implicit_parallel_v(
 void test_a1_build() {
     using timer = std::chrono::high_resolution_clock;
     // Test dimensions
-    const int m1 = 100;  // Stock price points
-    const int m2 = 50;  // Variance points
+    const int m1 = 50;  // Stock price points
+    const int m2 = 25;  // Variance points
     
     // Create grid
     Grid grid = create_test_grid(m1, m2);
@@ -279,7 +347,7 @@ void test_a1_build() {
     
     // Test parameters
     const double theta = 0.8;
-    const double dt = 1.0/14.0;
+    const double dt = 1.0/40.0;
     const double r_d = 0.025;
     const double r_f = 0.0;
 
@@ -322,8 +390,8 @@ void test_a1_build() {
     auto h_b = Kokkos::create_mirror_view(b);
     auto h_x = Kokkos::create_mirror_view(x);
         for (int i = 0; i < total_size; ++i) {
-            h_b(i) = (double)std::rand() / RAND_MAX;
-            h_x(i) = (double)std::rand() / RAND_MAX;
+            h_b(i) = 1.0 + i;//(double)std::rand() / RAND_MAX;
+            h_x(i) = 2.0 + i;//(double)std::rand() / RAND_MAX;
         }
     Kokkos::deep_copy(b, h_b);
     Kokkos::deep_copy(x, h_x);
@@ -636,6 +704,241 @@ void test_a1_structure_function() {
     }
 }
 
+//this tests calling multiple solver instances on the GPU
+void test_a1_multiple_instances(){
+    using timer = std::chrono::high_resolution_clock;
+
+    // Test parameters
+    double K = 100.0;
+    double S_0 = K;
+    double V_0 = 0.04;
+    double T = 1.0;
+    
+    const int m1 = 50;
+    const int m2 = 25;
+    std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
+
+    double theta = 0.8;
+    double delta_t = 1.0/40.0;
+
+    int nInstances = 20;          // or more
+    
+    // Host vector of grids
+    //std::vector<Grid> hostGrids(nInstances);
+
+
+    // For demonstration: create each Grid with a different "K" or offset
+    std::vector<Grid> hostGrids;
+    hostGrids.reserve(nInstances); 
+    for(int i = 0; i < nInstances; ++i) {
+        double K = 90.0 + 10.0 * i; 
+        hostGrids.emplace_back(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+    }
+    
+
+    /*
+    // Host vector of grids
+    std::vector<Grid> hostGrids(nInstances);
+    // For demonstration: create each Grid with a different "K" or offset
+    for(int i = 0; i < nInstances; ++i) {
+        double K = 100.0 + 10.0 * i;  
+        hostGrids[i] = create_test_grid(m1, m2);
+    }
+    */
+    
+    // Copy those Grids to device
+    Kokkos::View<Grid*> deviceGrids("deviceGrids", nInstances);
+    auto h_deviceGrids = Kokkos::create_mirror_view(deviceGrids);
+    for(int i = 0; i < nInstances; ++i) {
+        h_deviceGrids(i) = hostGrids[i];
+    }
+    Kokkos::deep_copy(deviceGrids, h_deviceGrids);
+
+    // 3D arrays for the diagonals: dimension [nInstances, (m2+1), (m1+1)]
+    Kokkos::View<double***> main_diag("main_diag", nInstances, m2+1, m1+1);
+    Kokkos::View<double***> lower_diag("lower_diag", nInstances, m2+1, m1);
+    Kokkos::View<double***> upper_diag("upper_diag", nInstances, m2+1, m1);
+
+    Kokkos::View<double***> impl_main_diag("impl_main_diag", nInstances, m2+1, m1+1);
+    Kokkos::View<double***> impl_lower_diag("impl_lower_diag", nInstances, m2+1, m1);
+    Kokkos::View<double***> impl_upper_diag("impl_upper_diag", nInstances, m2+1, m1);
+
+    int total_size = (m1+1)*(m2+1);
+
+    Kokkos::View<double**> x   ("x",   nInstances, total_size);
+    Kokkos::View<double**> b   ("b",   nInstances, total_size);
+    Kokkos::View<double***> temp("temp",nInstances, (m2+1), (m1+1)); 
+
+    ///////////////////////////////////////////////
+    // 1) Create host mirrors for x and b
+    ///////////////////////////////////////////////
+    auto h_x = Kokkos::create_mirror_view(x);
+    auto h_b = Kokkos::create_mirror_view(b);
+
+    // 2) Fill them with values
+    //    Here we do a simple pattern: x = (inst + 1.0), b = (inst + 2.0), etc.
+    for(int inst = 0; inst < nInstances; ++inst) {
+        for(int idx = 0; idx < total_size; ++idx) {
+            // Example: each instance has a unique offset so we can see it's not all zero
+            double val_x = 1.0+idx;//(inst + 1.0) + 0.001 * idx;
+            double val_b = 2.0+idx;//(inst + 2.0) + 0.002 * idx;
+
+            h_x(inst, idx) = val_x;
+            h_b(inst, idx) = val_b;
+        }
+    }
+
+    // 3) Copy the host data back to device
+    Kokkos::deep_copy(x, h_x);
+    Kokkos::deep_copy(b, h_b);
+
+    // or 2D if you prefer [nInstances, total_size], 
+    // but your solver code uses (m2+1, m1+1).
+
+    Kokkos::View<double**> result("result", nInstances, total_size);
+
+    using team_policy = Kokkos::TeamPolicy<>;
+    using member_type = team_policy::member_type;
+
+    // Each team handles ONE instance. 
+    team_policy policy(nInstances, Kokkos::AUTO);
+
+    auto t_start = timer::now();
+
+    Kokkos::parallel_for("build_and_solve_all", policy,
+    KOKKOS_LAMBDA(const member_type& team)
+    {
+        const int instance = team.league_rank();  // which PDE instance are we?
+
+        // 1) Subview the diagonals for this instance
+        auto mainDiag_i = Kokkos::subview(main_diag, instance, Kokkos::ALL, Kokkos::ALL);
+        auto lowerDiag_i = Kokkos::subview(lower_diag, instance, Kokkos::ALL, Kokkos::ALL);
+        auto upperDiag_i = Kokkos::subview(upper_diag, instance, Kokkos::ALL, Kokkos::ALL);
+
+        auto implMain_i = Kokkos::subview(impl_main_diag, instance, Kokkos::ALL, Kokkos::ALL);
+        auto implLower_i = Kokkos::subview(impl_lower_diag, instance, Kokkos::ALL, Kokkos::ALL);
+        auto implUpper_i = Kokkos::subview(impl_upper_diag, instance, Kokkos::ALL, Kokkos::ALL);
+
+        // 2) Subview the solution and RHS for this instance
+        auto x_i      = Kokkos::subview(x, instance, Kokkos::ALL);
+        auto b_i      = Kokkos::subview(b, instance, Kokkos::ALL);
+        auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);
+
+        // Possibly we need a 2D subview for 'temp'
+        auto temp_i = Kokkos::subview(temp, instance, Kokkos::ALL, Kokkos::ALL);
+
+        // Retrieve the grid for this instance
+        Grid grid_i = deviceGrids(instance);
+
+        // PDE parameters (could vary per instance)
+        double r_d   = 0.025;
+        double r_f   = 0.0;
+
+        
+        // 3) Now build the diagonals for this instance
+        build_a1_diagonals(
+            mainDiag_i, lowerDiag_i, upperDiag_i,
+            implMain_i, implLower_i, implUpper_i,
+            grid_i, theta, delta_t, r_d, r_f,
+            team
+        );
+        
+        
+        // 4) Multiply: A * x_i = result_i
+        //    (Each instance does the same PDE steps, but with its own data)
+        device_multiply_parallel_s_and_v(
+            mainDiag_i, lowerDiag_i, upperDiag_i,
+            x_i, result_i,
+            team
+        );
+
+        
+        // 5) Solve: (I - theta*dt*A)*x_i = b_i
+        device_solve_implicit_parallel_v(
+            implMain_i, implLower_i, implUpper_i,
+            x_i, temp_i, b_i,
+            team
+        );
+        
+        // 6) Optionally compute a local residual for debugging
+        team.team_barrier();
+        // If you want a local check, you can do another multiply or gather results:
+        // ...
+    });
+    Kokkos::fence();
+
+    auto t_end = timer::now();
+    std::cout << "ENTIRE KERNEL: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+
+
+    ////////////////////////////////////////////////////////////
+    // 1) Multiply again: result_i = A_i * x_i
+    ////////////////////////////////////////////////////////////
+    Kokkos::parallel_for("final_check_multiply", policy,
+    KOKKOS_LAMBDA(const member_type& team)
+    {
+    const int instance = team.league_rank();
+
+    // Subview the diagonals and x/result for this instance
+    auto mainDiag_i   = Kokkos::subview(main_diag,   instance, Kokkos::ALL, Kokkos::ALL);
+    auto lowerDiag_i  = Kokkos::subview(lower_diag,  instance, Kokkos::ALL, Kokkos::ALL);
+    auto upperDiag_i  = Kokkos::subview(upper_diag,  instance, Kokkos::ALL, Kokkos::ALL);
+
+    auto x_i      = Kokkos::subview(x, instance, Kokkos::ALL);
+    auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);
+
+    // Reuse your multiply function
+    device_multiply_parallel_s_and_v(
+        mainDiag_i, lowerDiag_i, upperDiag_i,
+        x_i, result_i,
+        team
+    );
+    });
+    Kokkos::fence();
+
+    ////////////////////////////////////////////////////////////
+    // 2) Copy x, b, and result back to host
+    ////////////////////////////////////////////////////////////
+    //h_x      = Kokkos::create_mirror_view(x);
+    //h_b      = Kokkos::create_mirror_view(b);
+    auto h_result = Kokkos::create_mirror_view(result);
+
+    Kokkos::deep_copy(h_x, x);
+    Kokkos::deep_copy(h_b, b);
+    Kokkos::deep_copy(h_result, result);
+
+    ////////////////////////////////////////////////////////////
+    // 3) Compute the residual on the host for each instance
+    ////////////////////////////////////////////////////////////
+    for(int inst = 0; inst < nInstances; ++inst) {
+
+    double residual_sum = 0.0;
+    for(int idx = 0; idx < total_size; idx++) {
+        double lhs = h_x(inst, idx);
+        double rhs = theta * delta_t * h_result(inst, idx) + h_b(inst, idx);
+
+        double diff = lhs - rhs;  // x - (θ⋅Δt⋅A x + b)
+        residual_sum += diff * diff;
+    }
+
+    double residual_norm = std::sqrt(residual_sum);
+
+    // Print the residual for this instance
+    std::cout << "Instance " << inst
+                << " => residual norm = " << residual_norm << std::endl;
+
+    // (Optional) print first ~5 solution values
+    std::cout << "  x[0..4] = ";
+    for(int i = 0; i < std::min(20,total_size); i++){
+        std::cout << h_x(inst, i) << " ";
+    }
+    std::cout << "\n------------------------------------\n";
+    }
+
+
+}
 
 
 void test_a1_kernel(){
@@ -643,7 +946,8 @@ Kokkos::initialize();
     {
         try{
             //test_a1_build();
-            test_a1_structure_function();
+            //test_a1_structure_function();
+            test_a1_multiple_instances();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;

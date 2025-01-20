@@ -18,6 +18,8 @@ struct Grid {
 
     Grid(int m1, double S, double S_0, double K, double c, 
          int m2, double V, double V_0, double d);
+
+    Grid() = default;  // <-- "do-nothing" constructor for device callable grids, this is on host side since we build them there
 };
 
 // Helper function to create test grid

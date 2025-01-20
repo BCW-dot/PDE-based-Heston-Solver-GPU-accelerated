@@ -63,6 +63,7 @@ void device_multiply_a0(
     const int total_size = x.extent(0);
 
     // First, zero out the entire result vector
+    //maybe we dont do total_size parallism here but rather m1. So that the biggest number of threads eacxh solver will need to have access to will always be m1
     Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
         [&](const int i) {
             result(i) = 0.0;
