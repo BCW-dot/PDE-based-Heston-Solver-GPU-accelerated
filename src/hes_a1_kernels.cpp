@@ -115,6 +115,8 @@ void device_solve_implicit_parallel_v(
 
 */
 
+//test build for parallel device
+
 template <class MDView, class LDView, class UDView,
           class IMDView, class ILDView, class IUDView>
 KOKKOS_FUNCTION
@@ -152,8 +154,25 @@ void build_a1_diagonals(
             // Interior points
             for(int i = 1; i < m1; i++) {
                 // Compute PDE coefficients
-                const double s = grid.device_Vec_s[i];
+                double s = grid.device_Vec_s[i];
                 const double v = grid.device_Vec_v[j];
+
+                // Print s for just j=0, i=1
+                // Only do this for j=0 and i=1 to limit the spam
+                if (j == 0 && i == 1) {
+                    // Print the size of device_Vec_s and the index
+                    int len_s = (int)grid.device_Vec_s.extent(0);
+                    printf("Debug: device_Vec_s.extent(0) = %d, i = %d\n", len_s, i);
+
+                    // Optionally guard against out-of-bounds
+                    double s_val;
+                    if (i < len_s) {
+                        s_val = grid.device_Vec_s(i);
+                    } else {
+                        s_val = -999.0; // sentinel
+                    }
+                    printf("Debug: s = %.8f\n", s_val);
+                }
                 
                 // a = 0.5*s^2*v (diffusion)
                 // b = (r_d - r_f)*s (drift)
@@ -165,30 +184,18 @@ void build_a1_diagonals(
 
                 // Build tridiagonal system for this level
                 // Lower diagonal
-                /*
-                lower_diag(j,i-1) = a * device_delta_s(i-1, -1, grid.device_Delta_s) + 
-                                    b * device_beta_s(i-1, -1, grid.device_Delta_s);
+                lower_diag(j,i-1) = -1;//a * device_delta_s(i-1, -1, grid.device_Delta_s) + 
+                                    //b * device_beta_s(i-1, -1, grid.device_Delta_s);
                 
                 // Main diagonal
-                main_diag(j,i) = a * device_delta_s(i-1, 0, grid.device_Delta_s) + 
-                                    b * device_beta_s(i-1, 0, grid.device_Delta_s) - 0.5 * r_d;
-                
-                // Upper diagonal
-                upper_diag(j,i) = a * device_delta_s(i-1, 1, grid.device_Delta_s) + 
-                                    b * device_beta_s(i-1, 1, grid.device_Delta_s);
-                */
-                
-                lower_diag(j,i-1) = s;//device_delta_s(i-1, -1, grid.device_Delta_s);
-                      
-                
-                // Main diagonal
-               main_diag(j,i) = 2;//a * device_delta_s(i-1, 0, grid.device_Delta_s) + 
-                                   // b * device_beta_s(i-1, 0, grid.device_Delta_s) - 0.5 * r_d;
+                main_diag(j,i) = 2;//a * device_delta_s(i-1, 0, grid.device_Delta_s) + 
+                                    //b * device_beta_s(i-1, 0, grid.device_Delta_s) - 0.5 * r_d;
                 
                 // Upper diagonal
                 upper_diag(j,i) = -1;//a * device_delta_s(i-1, 1, grid.device_Delta_s) + 
                                     //b * device_beta_s(i-1, 1, grid.device_Delta_s);
-
+                
+                
                 // Build implicit diagonals: (I - theta*dt*A)
                 impl_lower_diag(j,i-1) = -theta * dt * lower_diag(j,i-1);
                 impl_main_diag(j,i) = 1.0 - theta * dt * main_diag(j,i);
@@ -714,19 +721,15 @@ void test_a1_multiple_instances(){
     double V_0 = 0.04;
     double T = 1.0;
     
-    const int m1 = 50;
-    const int m2 = 25;
+    const int m1 = 15;
+    const int m2 = 15;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     double theta = 0.8;
     double delta_t = 1.0/40.0;
 
-    int nInstances = 20;          // or more
+    int nInstances = 5;          // or more
     
-    // Host vector of grids
-    //std::vector<Grid> hostGrids(nInstances);
-
-
     // For demonstration: create each Grid with a different "K" or offset
     std::vector<Grid> hostGrids;
     hostGrids.reserve(nInstances); 
@@ -753,6 +756,14 @@ void test_a1_multiple_instances(){
         h_deviceGrids(i) = hostGrids[i];
     }
     Kokkos::deep_copy(deviceGrids, h_deviceGrids);
+
+    /*
+    
+    test for Pod grids
+    
+    */
+
+
 
     // 3D arrays for the diagonals: dimension [nInstances, (m2+1), (m1+1)]
     Kokkos::View<double***> main_diag("main_diag", nInstances, m2+1, m1+1);
@@ -829,6 +840,13 @@ void test_a1_multiple_instances(){
 
         // Retrieve the grid for this instance
         Grid grid_i = deviceGrids(instance);
+
+        /*
+        
+        Testing Grid pod inside kernel call
+        
+        */
+        
 
         // PDE parameters (could vary per instance)
         double r_d   = 0.025;
@@ -940,6 +958,79 @@ void test_a1_multiple_instances(){
 
 }
 
+void buildMultipleGridViews(
+    std::vector<GridViews> &hostGrids,
+    int nInstances, int m1, int m2)
+{
+  // Resize to hold nInstances
+  hostGrids.resize(nInstances);
+
+  for(int i = 0; i < nInstances; i++) {
+    // 1) Allocate device arrays for each PDE dimension
+    hostGrids[i].device_Vec_s = Kokkos::View<double*>("vec_s",    m1+1);
+    hostGrids[i].device_Vec_v = Kokkos::View<double*>("vec_v",    m2+1);
+    hostGrids[i].device_Delta_s = Kokkos::View<double*>("delta_s",m1);
+    hostGrids[i].device_Delta_v = Kokkos::View<double*>("delta_v",m2);
+
+    hostGrids[i].m1 = m1;
+    hostGrids[i].m2 = m2;
+
+    // 2) For demo, just fill device_Vec_s with: (i * 100) + j
+    //    (Pretend it's your PDE logic.)
+    auto mirror_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
+    for(int j = 0; j <= m1; j++){
+      mirror_s(j) = 100.0 * i + j;  
+      // e.g. instance 0 => [0,1,2,...], instance 1 => [100,101,...]
+    }
+    Kokkos::deep_copy(hostGrids[i].device_Vec_s, mirror_s);
+
+    // For brevity, we won't fill device_Vec_v, device_Delta_s, etc. 
+    // but in real code, you'd do the same pattern with mirrors + deep_copy.
+  }
+}
+
+/*
+  3) A test function that:
+     - builds an array of GridViews on host,
+     - copies that array into deviceGridViews,
+     - launches a kernel that prints device_Vec_s(5) for each instance.
+*/
+void testMultipleGridViews()
+{
+  // Example: 5 PDE instances, each with m1=10, m2=8, etc.
+  int nInstances = 5;
+  int m1 = 10;
+  int m2 = 8;
+
+  // 3a) Build the array of GridViews on host
+  std::vector<GridViews> hostGrids;
+  buildMultipleGridViews(hostGrids, nInstances, m1, m2);
+
+  // 3b) Create a device array of GridViews
+  Kokkos::View<GridViews*> deviceGridViews("deviceGridViews", nInstances);
+  // Mirror
+  auto h_deviceGridViews = Kokkos::create_mirror_view(deviceGridViews);
+
+  // 3c) Copy the struct handles to device
+  for(int i=0; i<nInstances; i++){
+    h_deviceGridViews(i) = hostGrids[i];
+  }
+  Kokkos::deep_copy(deviceGridViews, h_deviceGridViews);
+
+  // 3d) Kernel that prints device_Vec_s(5) for each PDE instance
+  Kokkos::parallel_for("print_grid_s", Kokkos::RangePolicy<>(0,nInstances),
+    KOKKOS_LAMBDA(const int idx)
+  {
+    GridViews gv = deviceGridViews(idx);
+
+    double val = gv.device_Vec_s(5);
+    int length = gv.device_Vec_s.extent(0);
+
+    printf("Instance %d => device_Vec_s(5)=%.2f, extent=%d\n",
+           idx, val, length);
+  });
+  Kokkos::fence();
+}
 
 void test_a1_kernel(){
 Kokkos::initialize();
@@ -947,7 +1038,8 @@ Kokkos::initialize();
         try{
             //test_a1_build();
             //test_a1_structure_function();
-            test_a1_multiple_instances();
+            //test_a1_multiple_instances();
+            testMultipleGridViews();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;

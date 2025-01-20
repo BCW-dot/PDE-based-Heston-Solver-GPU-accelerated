@@ -4,6 +4,7 @@
 
 #include <Kokkos_Core.hpp>
 #include "grid.hpp"
+#include "grid_pod.hpp"
 
 KOKKOS_FUNCTION
 void build_a1_diagonals(
