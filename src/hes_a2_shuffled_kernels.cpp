@@ -280,8 +280,8 @@ void test_a2_build() {
     using timer = std::chrono::high_resolution_clock;
     
     // Test dimensions
-    const int m1 = 100;  // Stock price points
-    const int m2 = 50;   // Variance points
+    const int m1 = 300;  // Stock price points
+    const int m2 = 100;   // Variance points
     
     // Create grid
     Grid grid = create_test_grid(m1, m2);
@@ -783,8 +783,8 @@ void test_a2_shuffled_kernel(){
     Kokkos::initialize();
         {
             try{
-                //test_a2_build();
-                test_a2_shuffled_structure_function();
+                test_a2_build();
+                //test_a2_shuffled_structure_function();
                 //compare_a2_diagonal_kernels();
             }
             catch (std::exception& e) {

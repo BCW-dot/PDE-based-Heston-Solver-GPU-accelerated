@@ -78,7 +78,7 @@ inline void heston_A0Storage_gpu::multiply_seq(const Kokkos::View<double*>& x,
                         }
                     }
                 }
-                result(row_offset + i + 1) += sum;
+                result(row_offset + i + 1) = sum;
             }
         }
         

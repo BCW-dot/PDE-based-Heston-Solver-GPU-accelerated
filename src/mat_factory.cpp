@@ -3,6 +3,8 @@
 
 
 //this shoudl be a sequential implemntaion but somehow it is rly fast
+//i was timing the wriong thing, since after the parallel_for loop i ddi not call Kokkos::fence() 
+//i actually tested the Kernel overhead time (kernel call) and not the code itself
 void test_tridiagonal_matrixfree() {
     using timer = std::chrono::high_resolution_clock;
 

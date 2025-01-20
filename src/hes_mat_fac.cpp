@@ -1186,8 +1186,8 @@ void test_A0_multiply() {
     using timer = std::chrono::high_resolution_clock;
     
     // Test dimensions
-    const int m1 = 300; 
-    const int m2 = 100;
+    const int m1 = 5; 
+    const int m2 = 20;
     std::cout << "Testing A0 multiply with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
 
     // Create grid
@@ -1210,6 +1210,7 @@ void test_A0_multiply() {
     Kokkos::parallel_for("init_x", total_size, KOKKOS_LAMBDA(const int idx) {
         x(idx) = static_cast<double>(idx + 1);
     });
+
     
     // Zero result vector
     Kokkos::deep_copy(result, 0.0);
@@ -1232,8 +1233,8 @@ void test_A0_multiply() {
 
     // Print first few results
     std::cout << "\nFirst 10 results:\n";
-    for(int i = 0; i < std::min(10, total_size); i++) {
-        std::cout << "result[" << i << "] = " << h_result(i) << "\n";
+    for(int i = 0; i < std::min(60, total_size); i++) {
+        std::cout << "result[" << i << "] = " << h_result(i) << " ";
     }
 }
 
@@ -1946,9 +1947,9 @@ void test_hes_mat_fac() {
 
             //test_A1_structure();
             
-            //test_A0_multiply();
+            test_A0_multiply();
             //test_parallel_tridiagonal();
-            test_A1_multiply_and_implicit();
+            //test_A1_multiply_and_implicit();
             //test_A2_multiply_and_implicit();
 
             //test_A1_device_in_one_kernel();

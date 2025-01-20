@@ -15,6 +15,7 @@
 
 #include "hes_a1_kernels.hpp"
 #include "hes_a2_shuffled_kernels.hpp"
+#include "hes_a0_kernels.hpp"
 
 #include <iostream>
 
@@ -50,7 +51,8 @@ int main(int argc, char* argv[]) {
 
     */
     //test_a1_kernel();
-    test_a2_shuffled_kernel();
+    //test_a2_shuffled_kernel();
+    test_a0_kernel();
 
 
 
