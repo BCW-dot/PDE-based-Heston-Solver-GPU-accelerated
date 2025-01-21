@@ -568,8 +568,8 @@ void test_heston_A1() {
 */
 //A1 class test
 void test_heston_A1() {
-    int m1 = 300;
-    int m2 = 100;
+    int m1 = 100;
+    int m2 = 75;
     Grid grid = create_test_grid(m1, m2);
     
     heston_A1Storage_gpu A1(m1, m2);
@@ -578,8 +578,8 @@ void test_heston_A1() {
     double r_d = 0.025;
     double r_f = 0.0;
 
-    const double theta = 0.5;
-    const double delta_t = 0.05; 
+    const double theta = 0.8;
+    const double delta_t = 1.0/40.0; 
 
     using timer = std::chrono::high_resolution_clock;
     
@@ -1242,8 +1242,8 @@ void test_A1_multiply_and_implicit() {
     using timer = std::chrono::high_resolution_clock;
     
     // Test dimensions
-    const int m1 = 300;
-    const int m2 = 100;
+    const int m1 = 100;
+    const int m2 = 75;
     std::cout << "Testing A1 with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
 
     // Create grid
@@ -1257,7 +1257,7 @@ void test_A1_multiply_and_implicit() {
     double r_f = 0.0;
 
     double theta = 0.8;
-    double delta_t = 1.0/14;
+    double delta_t = 1.0/40;
 
     A1.build_matrix(grid, rho, sigma, r_d, r_f);
 
@@ -1282,8 +1282,8 @@ void test_A1_multiply_and_implicit() {
     auto h_b = Kokkos::create_mirror_view(b);
     auto h_x = Kokkos::create_mirror_view(x);
     for (int i = 0; i < total_size; ++i) {
-        h_b(i) = std::rand() / (RAND_MAX + 1.0);
-        h_x(i) = std::rand() / (RAND_MAX + 1.0);
+        h_b(i) = total_size - i;//std::rand() / (RAND_MAX + 1.0);
+        h_x(i) = 1.0 + i;//std::rand() / (RAND_MAX + 1.0);
     }
     Kokkos::deep_copy(b, h_b);
     Kokkos::deep_copy(x, h_x);
@@ -1945,11 +1945,11 @@ void test_hes_mat_fac() {
             //test_heston_A1();
             //test_heston_A2();
 
-            test_A1_structure();
+            //test_A1_structure();
             
             //test_A0_multiply();
             //test_parallel_tridiagonal();
-            //test_A1_multiply_and_implicit();
+            test_A1_multiply_and_implicit();
             //test_A2_multiply_and_implicit();
 
             //test_A1_device_in_one_kernel();

@@ -262,7 +262,6 @@ void device_multiply_parallel_s_and_v(
 }
 
 
-
 template<
     class View2D_const_main,
     class View2D_const_lower,
@@ -323,6 +322,8 @@ void test_a1_build() {
     // Test dimensions
     const int m1 = 100;  // Stock price points
     const int m2 = 75;  // Variance points
+
+    std::cout << "Dim m1: " << m1 << ", m2: " << m2 << std::endl;
     
     // Create grid
     Grid grid = create_test_grid(m1, m2);
@@ -382,8 +383,8 @@ void test_a1_build() {
     auto h_b = Kokkos::create_mirror_view(b);
     auto h_x = Kokkos::create_mirror_view(x);
         for (int i = 0; i < total_size; ++i) {
-            h_b(i) = total_size - i;//(double)std::rand() / RAND_MAX;
-            h_x(i) = 1.0 + i;//(double)std::rand() / RAND_MAX;
+            h_b(i) = (double)std::rand() / RAND_MAX;//total_size - i;//(double)std::rand() / RAND_MAX;
+            h_x(i) = (double)std::rand() / RAND_MAX;//1.0 + i;//(double)std::rand() / RAND_MAX;
         }
     Kokkos::deep_copy(b, h_b);
     Kokkos::deep_copy(x, h_x);
@@ -574,7 +575,7 @@ void test_a1_structure_function() {
     double r_d = 0.025;
     double r_f = 0.0;
     double theta = 0.8;
-    double delta_t = 1.0/20;
+    double delta_t = 1.0/40;
 
     // Build matrices using team policy
     using team_policy = Kokkos::TeamPolicy<>;
@@ -813,8 +814,8 @@ void test_a1_multiple_instances(){
     for(int inst = 0; inst < nInstances; ++inst) {
         for(int idx = 0; idx < total_size; ++idx) {
             // Example: each instance has a unique offset so we can see it's not all zero
-            double val_x = 1.0+idx;//(inst + 1.0) + 0.001 * idx;
-            double val_b = total_size - idx;//(inst + 2.0) + 0.002 * idx;
+            double val_x = (double)std::rand() / RAND_MAX;//1.0+idx;//(inst + 1.0) + 0.001 * idx;
+            double val_b = (double)std::rand() / RAND_MAX;//total_size - idx;//(inst + 2.0) + 0.002 * idx;
 
             h_x(inst, idx) = val_x;
             h_b(inst, idx) = val_b;
@@ -1134,7 +1135,6 @@ void test_myGrids()
   });
   Kokkos::fence();
 }
-
 
 
 
