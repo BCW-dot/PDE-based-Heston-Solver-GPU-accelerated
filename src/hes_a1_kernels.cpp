@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <iostream>
 #include "coeff.hpp"
+#include <numeric>   // For std::accumulate
 
 void buildMultipleGridViews(
     std::vector<GridViews> &hostGrids,
@@ -197,7 +198,6 @@ void build_a1_diagonals(
 }
 
 
-
 //name is missleading, we are just parallising in v
 template<
     class View2D_const_main,  // e.g. Kokkos::View<const double**, LayoutStride, ...>
@@ -234,6 +234,7 @@ void device_multiply_parallel_s_and_v(
             const int offset = j * (m1 + 1);
 
             // Option A: Do a simple for-loop over i
+            /*
             for (int i = 0; i <= m1; i++) {
                 double sum = main_diag(j, i) * x(offset + i);
 
@@ -245,16 +246,24 @@ void device_multiply_parallel_s_and_v(
                 }
                 result(offset + i) = sum;
             }
+            */
+            // First point (i=0): only has main and upper diagonal
+            double sum = main_diag(j, 0) * x(offset);
+            sum += upper_diag(j, 0) * x(offset + 1);
+            result(offset) = sum;
 
-            // Option B: Another (often more GPU-friendly) approach is
-            // to add a nested parallel_for with ThreadVectorRange here:
-            //
-            // Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, m1 + 1),
-            //     [&](const int i) {
-            //         double sum = main_diag(j, i) * x(offset + i);
-            //         ...
-            //         result(offset + i) = sum;
-            //     });
+            // Middle points: have all three diagonals
+            for (int i = 1; i < m1; i++) {
+                double sum = lower_diag(j, i-1) * x(offset + i-1) +
+                            main_diag(j, i) * x(offset + i) +
+                            upper_diag(j, i) * x(offset + i+1);
+                result(offset + i) = sum;
+            }
+
+            // Last point (i=m1): only has main and lower diagonal
+            sum = lower_diag(j, m1-1) * x(offset + m1-1) +
+                main_diag(j, m1) * x(offset + m1);
+            result(offset + m1) = sum;
         });
 
     // Barrier to ensure all threads in this team are done
@@ -786,8 +795,6 @@ void test_a1_multiple_instances(){
     Kokkos::deep_copy(deviceGrids, h_deviceGrids);
 
     
-
-
     // 3D arrays for the diagonals: dimension [nInstances, (m2+1), (m1+1)]
     Kokkos::View<double***> main_diag("main_diag", nInstances, m2+1, m1+1);
     Kokkos::View<double***> lower_diag("lower_diag", nInstances, m2+1, m1);
@@ -837,10 +844,89 @@ void test_a1_multiple_instances(){
     // Each team handles ONE instance. 
     team_policy policy(nInstances, Kokkos::AUTO);
 
-    auto t_start = timer::now();
+    //auto t_start = timer::now();
 
-    Kokkos::parallel_for("build_and_solve_all", policy,
-    KOKKOS_LAMBDA(const member_type& team)
+    const int NUM_RUNS = 10;  // Number of timing runs
+    std::vector<double> timings(NUM_RUNS);
+
+    // Run multiple times for timing
+    for(int run = 0; run < NUM_RUNS; run++) {
+        auto t_start = timer::now();
+        
+        Kokkos::parallel_for("build_and_solve_all", policy, KOKKOS_LAMBDA(const member_type& team)
+        {
+            const int instance = team.league_rank();  // which PDE instance are we?
+
+            // 1) Subview the diagonals for this instance
+            auto mainDiag_i = Kokkos::subview(main_diag, instance, Kokkos::ALL, Kokkos::ALL);
+            auto lowerDiag_i = Kokkos::subview(lower_diag, instance, Kokkos::ALL, Kokkos::ALL);
+            auto upperDiag_i = Kokkos::subview(upper_diag, instance, Kokkos::ALL, Kokkos::ALL);
+
+            auto implMain_i = Kokkos::subview(impl_main_diag, instance, Kokkos::ALL, Kokkos::ALL);
+            auto implLower_i = Kokkos::subview(impl_lower_diag, instance, Kokkos::ALL, Kokkos::ALL);
+            auto implUpper_i = Kokkos::subview(impl_upper_diag, instance, Kokkos::ALL, Kokkos::ALL);
+
+            // 2) Subview the solution and RHS for this instance
+            auto x_i      = Kokkos::subview(x, instance, Kokkos::ALL);
+            auto b_i      = Kokkos::subview(b, instance, Kokkos::ALL);
+            auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);
+
+            // Possibly we need a 2D subview for 'temp'
+            auto temp_i = Kokkos::subview(temp, instance, Kokkos::ALL, Kokkos::ALL);
+
+            // Retrieve the grid for this instance
+            GridViews grid_i = deviceGrids(instance);
+
+            // PDE parameters (could vary per instance)
+            double r_d   = 0.025;
+            double r_f   = 0.0;
+
+            // 3) Now build the diagonals for this instance
+            build_a1_diagonals(
+                mainDiag_i, lowerDiag_i, upperDiag_i,
+                implMain_i, implLower_i, implUpper_i,
+                grid_i, theta, delta_t, r_d, r_f,
+                team
+            );
+            
+            
+            // 4) Multiply: A * x_i = result_i
+            //    (Each instance does the same PDE steps, but with its own data)
+            device_multiply_parallel_s_and_v(
+                mainDiag_i, lowerDiag_i, upperDiag_i,
+                x_i, result_i,
+                team
+            );
+
+            // 5) Solve: (I - theta*dt*A)*x_i = b_i
+            device_solve_implicit_parallel_v(
+                implMain_i, implLower_i, implUpper_i,
+                x_i, temp_i, b_i,
+                team
+            );
+            team.team_barrier();
+        });
+        Kokkos::fence();
+
+        auto t_end = timer::now();
+        timings[run] = std::chrono::duration<double>(t_end - t_start).count();
+    }
+
+    // Compute average and variance
+    double avg_time = std::accumulate(timings.begin(), timings.end(), 0.0) / NUM_RUNS;
+    
+    double variance = 0.0;
+    for(const auto& t : timings) {
+        variance += (t - avg_time) * (t - avg_time);
+    }
+    variance /= NUM_RUNS;
+    double std_dev = std::sqrt(variance);
+
+    std::cout << "Average time: " << avg_time << " seconds\n";
+    std::cout << "Standard deviation: " << std_dev << " seconds\n";
+
+    /*
+    Kokkos::parallel_for("build_and_solve_all", policy, KOKKOS_LAMBDA(const member_type& team)
     {
         const int instance = team.league_rank();  // which PDE instance are we?
 
@@ -864,18 +950,10 @@ void test_a1_multiple_instances(){
         // Retrieve the grid for this instance
         GridViews grid_i = deviceGrids(instance);
 
-        /*
-        
-        Testing Grid pod inside kernel call
-        
-        */
-        
-
         // PDE parameters (could vary per instance)
         double r_d   = 0.025;
         double r_f   = 0.0;
 
-        
         // 3) Now build the diagonals for this instance
         build_a1_diagonals(
             mainDiag_i, lowerDiag_i, upperDiag_i,
@@ -893,25 +971,22 @@ void test_a1_multiple_instances(){
             team
         );
 
-        
         // 5) Solve: (I - theta*dt*A)*x_i = b_i
         device_solve_implicit_parallel_v(
             implMain_i, implLower_i, implUpper_i,
             x_i, temp_i, b_i,
             team
         );
-        
-        // 6) Optionally compute a local residual for debugging
         team.team_barrier();
-        // If you want a local check, you can do another multiply or gather results:
-        // ...
     });
     Kokkos::fence();
+    */
+    
 
-    auto t_end = timer::now();
-    std::cout << "ENTIRE KERNEL: "
-              << std::chrono::duration<double>(t_end - t_start).count()
-              << " seconds" << std::endl;
+    //auto t_end = timer::now();
+    //std::cout << "ENTIRE KERNEL: "
+              //<< std::chrono::duration<double>(t_end - t_start).count()
+              //<< " seconds" << std::endl;
 
 
     ////////////////////////////////////////////////////////////
@@ -979,6 +1054,102 @@ void test_a1_multiple_instances(){
     */
     std::cout << "\n------------------------------------\n";
     }
+}
+
+
+//first test which prints out the Residual and the Diagonals as well as the implicict diagoanls
+void test_speed_instances_vs_single() {
+    using timer = std::chrono::high_resolution_clock;
+    // Test dimensions
+    const int m1 = 100;  // Stock price points
+    const int m2 = 75;  // Variance points
+
+    std::cout << "Dim m1: " << m1 << ", m2: " << m2 << std::endl;
+    
+    // Create grid
+    Grid grid = create_test_grid(m1, m2);
+    
+    // Create Views for diagonals
+    Kokkos::View<double**> main_diag("main_diag", m2+1, m1+1);
+    Kokkos::View<double**> lower_diag("lower_diag", m2+1, m1);
+    Kokkos::View<double**> upper_diag("upper_diag", m2+1, m1);
+    
+    Kokkos::View<double**> impl_main_diag("impl_main_diag", m2+1, m1+1);
+    Kokkos::View<double**> impl_lower_diag("impl_lower_diag", m2+1, m1);
+    Kokkos::View<double**> impl_upper_diag("impl_upper_diag", m2+1, m1);
+    
+    // Test parameters
+    const double theta = 0.8;
+    const double dt = 1.0/40.0;
+    const double r_d = 0.025;
+    const double r_f = 0.0;
+
+    // Build diagonals
+    // And then for testing:
+    using team_policy = Kokkos::TeamPolicy<>;
+    using member_type = team_policy::member_type;
+
+    team_policy policy(1, Kokkos::AUTO);  // One team for testing, with "Kokkos::Auto" number of threads
+    
+    /*
+    
+    Testing multiply
+    
+    */
+    //building rhs and multiply vectors
+    const int total_size = (m1 + 1) * (m2 + 1);
+    Kokkos::View<double*> x("x", (m2+1)*(m1+1));
+    Kokkos::View<double*> b("b", (m2+1)*(m1+1));
+    Kokkos::View<double*> result("result", total_size);
+
+    auto h_b = Kokkos::create_mirror_view(b);
+    auto h_x = Kokkos::create_mirror_view(x);
+    auto h_result = Kokkos::create_mirror_view(result);
+        for (int i = 0; i < total_size; ++i) {
+            h_b(i) = (double)std::rand() / RAND_MAX;//total_size - i;//(double)std::rand() / RAND_MAX;
+            h_x(i) = (double)std::rand() / RAND_MAX;//1.0 + i;//(double)std::rand() / RAND_MAX;
+        }
+    Kokkos::deep_copy(b, h_b);
+    Kokkos::deep_copy(x, h_x);
+    Kokkos::deep_copy(result, 0.0);
+
+    Kokkos::View<double**> temp("temp", m2+1, m1+1);
+
+    const int NUM_RUNS = 10;  // Run multiple times to get average
+    std::vector<double> timings(NUM_RUNS);
+
+    for(int run = 0; run < NUM_RUNS; run++) {
+        auto t_start = timer::now();
+        
+        Kokkos::parallel_for("test_device_call", policy,
+            KOKKOS_LAMBDA(const member_type& team) {
+                build_a1_diagonals(
+                main_diag, lower_diag, upper_diag,
+                impl_main_diag, impl_lower_diag, impl_upper_diag,
+                grid, theta, dt, r_d, r_f,
+                team);
+
+            device_multiply_parallel_s_and_v(
+                main_diag, lower_diag, upper_diag,
+                x, 
+                result,  // input x, output result
+                team);
+
+            device_solve_implicit_parallel_v(
+            impl_main_diag, impl_lower_diag, impl_upper_diag,
+            x, temp, b,  // Use the non-const copies
+            team);
+            });
+        Kokkos::fence();
+        
+        auto t_end = timer::now();
+        timings[run] = std::chrono::duration<double>(t_end - t_start).count();
+    }
+
+    // Compute statistics
+    double avg_time = std::accumulate(timings.begin(), timings.end(), 0.0) / NUM_RUNS;
+
+    std::cout << "Average time: " << avg_time << " seconds\n";
 }
 
 
@@ -1064,7 +1235,6 @@ void testMultipleGridViews()
   Kokkos::fence();
 }
 
-
 void test_myGrids()
 {
   // Initialize vectors with grid views and diagonals
@@ -1138,6 +1308,7 @@ void test_myGrids()
 
 
 
+
 void test_a1_kernel(){
     Kokkos::initialize();
     {
@@ -1148,6 +1319,8 @@ void test_a1_kernel(){
             test_a1_multiple_instances();
             //testMultipleGridViews();
             //test_myGrids();
+
+            //test_speed_instances_vs_single();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;

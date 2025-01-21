@@ -765,7 +765,7 @@ void test_A1_structure() {
     
     // Test implicit solve
     double theta = 0.8;
-    double delta_t = 1.0/20;
+    double delta_t = 1.0/40;
     A1.build_implicit(theta, delta_t);
     A1.solve_implicit(x, b);
     
@@ -1945,13 +1945,18 @@ void test_hes_mat_fac() {
             //test_heston_A1();
             //test_heston_A2();
 
-            //test_A1_structure();
+            test_A1_structure();
             
             //test_A0_multiply();
             //test_parallel_tridiagonal();
-            test_A1_multiply_and_implicit();
+            //test_A1_multiply_and_implicit();
             //test_A2_multiply_and_implicit();
 
+            /*
+            
+            These tests have been removed from the code (commented out)
+
+            */
             //test_A1_device_in_one_kernel();
             //test_device_callable();
 
