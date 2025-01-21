@@ -5,9 +5,7 @@
 #include "coeff.hpp"
 #include <numeric>   // For std::accumulate
 
-void buildMultipleGridViews(
-    std::vector<GridViews> &hostGrids,
-    int nInstances, int m1, int m2);
+//void buildMultipleGridViews(std::vector<GridViews> &hostGrids,int nInstances, int m1, int m2);
 
 //runs on the cpu for testing
 /*
@@ -739,7 +737,8 @@ void test_a1_multiple_instances(){
     double theta = 0.8;
     double delta_t = 1.0/40.0;
 
-    int nInstances = 5;          
+    int nInstances = 20;
+    std::cout << "Instances: " << nInstances << std::endl;      
 
     /*
     
@@ -762,6 +761,7 @@ void test_a1_multiple_instances(){
         
         // Create temporary Grid object to get the values
         //Grid tempGrid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
         Grid tempGrid = create_test_grid(m1,m2);
         // Copy values to host mirrors
         for(int j = 0; j <= m1; j++) {
@@ -846,7 +846,7 @@ void test_a1_multiple_instances(){
 
     //auto t_start = timer::now();
 
-    const int NUM_RUNS = 10;  // Number of timing runs
+    const int NUM_RUNS = 20;  // Number of timing runs
     std::vector<double> timings(NUM_RUNS);
 
     // Run multiple times for timing
@@ -1028,31 +1028,31 @@ void test_a1_multiple_instances(){
     ////////////////////////////////////////////////////////////
     // 3) Compute the residual on the host for each instance
     ////////////////////////////////////////////////////////////
-    for(int inst = 0; inst < nInstances; ++inst) {
+    for(int inst = 0; inst < min(5,nInstances); ++inst) {
 
-    double residual_sum = 0.0;
-    for(int idx = 0; idx < total_size; idx++) {
-        double lhs = h_x(inst, idx);
-        double rhs = theta * delta_t * h_result(inst, idx) + h_b(inst, idx);
+        double residual_sum = 0.0;
+        for(int idx = 0; idx < total_size; idx++) {
+            double lhs = h_x(inst, idx);
+            double rhs = theta * delta_t * h_result(inst, idx) + h_b(inst, idx);
 
-        double diff = lhs - rhs;  // x - (θ⋅Δt⋅A x + b)
-        residual_sum += diff * diff;
-    }
+            double diff = lhs - rhs;  // x - (θ⋅Δt⋅A x + b)
+            residual_sum += diff * diff;
+        }
 
-    double residual_norm = std::sqrt(residual_sum);
+        double residual_norm = std::sqrt(residual_sum);
 
-    // Print the residual for this instance
-    std::cout << "Instance " << inst
-                << " => residual norm = " << residual_norm << std::endl;
+        // Print the residual for this instance
+        std::cout << "Instance " << inst
+                    << " => residual norm = " << residual_norm << std::endl;
 
-    // (Optional) print first ~5 solution values
-    /*
-    std::cout << "  x[0..4] = ";
-    for(int i = 0; i < std::min(20,total_size); i++){
-        std::cout << h_x(inst, i) << " ";
-    }
-    */
-    std::cout << "\n------------------------------------\n";
+        // (Optional) print first ~5 solution values
+        /*
+        std::cout << "  x[0..4] = ";
+        for(int i = 0; i < std::min(20,total_size); i++){
+            std::cout << h_x(inst, i) << " ";
+        }
+        */
+        std::cout << "\n------------------------------------\n";
     }
 }
 
@@ -1115,7 +1115,7 @@ void test_speed_instances_vs_single() {
 
     Kokkos::View<double**> temp("temp", m2+1, m1+1);
 
-    const int NUM_RUNS = 10;  // Run multiple times to get average
+    const int NUM_RUNS = 50;  // Run multiple times to get average
     std::vector<double> timings(NUM_RUNS);
 
     for(int run = 0; run < NUM_RUNS; run++) {
@@ -1149,7 +1149,15 @@ void test_speed_instances_vs_single() {
     // Compute statistics
     double avg_time = std::accumulate(timings.begin(), timings.end(), 0.0) / NUM_RUNS;
 
+    double variance = 0.0;
+    for(const auto& t : timings) {
+        variance += (t - avg_time) * (t - avg_time);
+    }
+    variance /= NUM_RUNS;
+    double std_dev = std::sqrt(variance);
+
     std::cout << "Average time: " << avg_time << " seconds\n";
+    std::cout << "Standard deviation: " << std_dev << " seconds\n";
 }
 
 
@@ -1159,6 +1167,7 @@ void test_speed_instances_vs_single() {
  * 
  */
 //this function is the "constructor" for the struct GridViews
+/*
 void buildMultipleGridViews(
     std::vector<GridViews> &hostGrids,
     int nInstances, int m1, int m2)
@@ -1188,9 +1197,10 @@ void buildMultipleGridViews(
 
     // For brevity, we won't fill device_Vec_v, device_Delta_s, etc. 
     // but in real code, you'd do the same pattern with mirrors + deep_copy.
-    */
+    
   }
 }
+*/
 
 /*
   3) A test function that:

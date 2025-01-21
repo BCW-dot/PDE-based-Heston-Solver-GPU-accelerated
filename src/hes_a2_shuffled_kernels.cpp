@@ -38,20 +38,25 @@ void device_unshuffle_vector(
     team.team_barrier();
 }
 
+
+
 // Matrix building implementation
+template <class MDView, class LDView, class L2DView, class UDView, class U2DView,
+          class IMDView, class ILDView, class IL2DView, class IUDView, class IU2DView,
+          class GridType>
 KOKKOS_FUNCTION
 void build_a2_diagonals_shuffled(
-    const Kokkos::View<double**>& main_diag,
-    const Kokkos::View<double**>& lower_diag,
-    const Kokkos::View<double**>& lower2_diag,
-    const Kokkos::View<double**>& upper_diag,
-    const Kokkos::View<double**>& upper2_diag,
-    const Kokkos::View<double**>& impl_main_diag,
-    const Kokkos::View<double**>& impl_lower_diag,
-    const Kokkos::View<double**>& impl_lower2_diag,
-    const Kokkos::View<double**>& impl_upper_diag,
-    const Kokkos::View<double**>& impl_upper2_diag,
-    const Grid& grid,
+    const MDView& main_diag,
+    const LDView& lower_diag,
+    const L2DView& lower2_diag,
+    const UDView& upper_diag,
+    const U2DView& upper2_diag,
+    const IMDView& impl_main_diag,
+    const ILDView& impl_lower_diag,
+    const IL2DView& impl_lower2_diag,
+    const IUDView& impl_upper_diag,
+    const IU2DView& impl_upper2_diag,
+    const GridType& grid,
     const double theta,
     const double dt,
     const double r_d,
@@ -119,16 +124,21 @@ void build_a2_diagonals_shuffled(
     team.team_barrier();
 }
 
+
+
 // Matrix-vector multiplication implementation
+template<class View2D_const_main, class View2D_const_lower, 
+         class View2D_const_lower2, class View2D_const_upper,
+         class View2D_const_upper2, class View1D_x, class View1D_result>
 KOKKOS_FUNCTION
 void device_multiply_shuffled(
-    const Kokkos::View<const double**>& main_diag,
-    const Kokkos::View<const double**>& lower_diag,
-    const Kokkos::View<const double**>& lower2_diag,
-    const Kokkos::View<const double**>& upper_diag,
-    const Kokkos::View<const double**>& upper2_diag,
-    const Kokkos::View<double*>& x,
-    const Kokkos::View<double*>& result,
+    const View2D_const_main& main_diag,
+    const View2D_const_lower& lower_diag,
+    const View2D_const_lower2& lower2_diag,
+    const View2D_const_upper& upper_diag,
+    const View2D_const_upper2& upper2_diag,
+    const View1D_x& x,
+    const View1D_result& result,
     const Kokkos::TeamPolicy<>::member_type& team)
 {
     const int local_m1 = main_diag.extent(0) - 1;
@@ -193,19 +203,26 @@ void device_multiply_shuffled(
     team.team_barrier();
 }
 
+
+
 // Implicit solve implementation
+template<class View2D_const_main, class View2D_const_lower, 
+         class View2D_const_lower2, class View2D_const_upper,
+         class View2D_const_upper2, class View1D_x, 
+         class View2D_c, class View2D_c2, class View2D_d,
+         class View1D_b>
 KOKKOS_FUNCTION
 void device_solve_implicit_shuffled(
-    const Kokkos::View<const double**>& impl_main_diag,
-    const Kokkos::View<const double**>& impl_lower_diag,
-    const Kokkos::View<const double**>& impl_lower2_diag,
-    const Kokkos::View<const double**>& impl_upper_diag,
-    const Kokkos::View<const double**>& impl_upper2_diag,
-    const Kokkos::View<double*>& x,
-    const Kokkos::View<double**>& c_prime,
-    const Kokkos::View<double**>& c2_prime,
-    const Kokkos::View<double**>& d_prime,
-    const Kokkos::View<double*>& b,
+    const View2D_const_main& impl_main_diag,
+    const View2D_const_lower& impl_lower_diag,
+    const View2D_const_lower2& impl_lower2_diag,
+    const View2D_const_upper& impl_upper_diag,
+    const View2D_const_upper2& impl_upper2_diag,
+    const View1D_x& x,
+    const View2D_c& c_prime,
+    const View2D_c2& c2_prime,
+    const View2D_d& d_prime,
+    const View1D_b& b,
     const Kokkos::TeamPolicy<>::member_type& team)
 {
     const int local_m1 = impl_main_diag.extent(0) - 1;
@@ -274,14 +291,13 @@ void device_solve_implicit_shuffled(
 Tests
 
 */
-
 //Residual Test
 void test_a2_build() {
     using timer = std::chrono::high_resolution_clock;
     
     // Test dimensions
-    const int m1 = 300;  // Stock price points
-    const int m2 = 100;   // Variance points
+    const int m1 = 100;  // Stock price points
+    const int m2 = 75;   // Variance points
     
     // Create grid
     Grid grid = create_test_grid(m1, m2);
