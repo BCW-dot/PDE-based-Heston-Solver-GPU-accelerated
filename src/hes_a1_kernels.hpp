@@ -4,7 +4,6 @@
 
 #include <Kokkos_Core.hpp>
 #include "grid.hpp"
-#include "grid_pod.hpp"
 
 template <class MDView, class LDView, class UDView,
           class IMDView, class ILDView, class IUDView,

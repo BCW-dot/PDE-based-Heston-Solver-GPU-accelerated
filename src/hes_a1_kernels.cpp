@@ -4,6 +4,7 @@
 #include <iostream>
 #include "coeff.hpp"
 #include <numeric>   // For std::accumulate
+#include "grid_pod.hpp"
 
 //void buildMultipleGridViews(std::vector<GridViews> &hostGrids,int nInstances, int m1, int m2);
 
@@ -732,7 +733,7 @@ void test_a1_multiple_instances(){
     
     const int m1 = 100;
     const int m2 = 75;
-    std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
+    std::cout << "A1 Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     double theta = 0.8;
     double delta_t = 1.0/40.0;
@@ -1161,46 +1162,6 @@ void test_speed_instances_vs_single() {
 }
 
 
-/**
- * 
- * Test grid usage on device
- * 
- */
-//this function is the "constructor" for the struct GridViews
-/*
-void buildMultipleGridViews(
-    std::vector<GridViews> &hostGrids,
-    int nInstances, int m1, int m2)
-{
-  // Resize to hold nInstances
-  hostGrids.resize(nInstances);
-
-  for(int i = 0; i < nInstances; i++) {
-    // 1) Allocate device arrays for each PDE dimension
-    hostGrids[i].device_Vec_s = Kokkos::View<double*>("vec_s",    m1+1);
-    hostGrids[i].device_Vec_v = Kokkos::View<double*>("vec_v",    m2+1);
-    hostGrids[i].device_Delta_s = Kokkos::View<double*>("delta_s",m1);
-    hostGrids[i].device_Delta_v = Kokkos::View<double*>("delta_v",m2);
-
-    hostGrids[i].m1 = m1;
-    hostGrids[i].m2 = m2;
-
-    /*
-    // 2) For demo, just fill device_Vec_s with: (i * 100) + j
-    //    (Pretend it's your PDE logic.)
-    auto mirror_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
-    for(int j = 0; j <= m1; j++){
-      mirror_s(j) = 100.0 * i + j;  
-      // e.g. instance 0 => [0,1,2,...], instance 1 => [100,101,...]
-    }
-    Kokkos::deep_copy(hostGrids[i].device_Vec_s, mirror_s);
-
-    // For brevity, we won't fill device_Vec_v, device_Delta_s, etc. 
-    // but in real code, you'd do the same pattern with mirrors + deep_copy.
-    
-  }
-}
-*/
 
 /*
   3) A test function that:

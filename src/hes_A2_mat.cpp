@@ -579,7 +579,7 @@ void test_heston_A2_shuffled() {
     
     // Test implicit system building and solving
     double theta = 0.8;
-    double delta_t = 1.0/14;
+    double delta_t = 1.0/40;
     A2.build_implicit(theta, delta_t);
 
     // Create test vectors
@@ -592,8 +592,8 @@ void test_heston_A2_shuffled() {
     auto h_b = Kokkos::create_mirror_view(b);
     auto h_x = Kokkos::create_mirror_view(x);
     for (int i = 0; i < total_size; ++i) {
-        h_b(i) = std::rand() / (RAND_MAX + 1.0);
-        h_x(i) = std::rand() / (RAND_MAX + 1.0);
+        h_b(i) = i + 1;//std::rand() / (RAND_MAX + 1.0);
+        h_x(i) = i + 1;//std::rand() / (RAND_MAX + 1.0);
     }
     Kokkos::deep_copy(b, h_b);
     Kokkos::deep_copy(x, h_x);
@@ -636,6 +636,11 @@ void test_heston_A2_shuffled() {
     
     std::cout << "Residual norm: " << residual << std::endl;
     
+    std::cout << "First few x values: ";
+    for(int i = 0; i < std::min(5, total_size); i++) {
+        std::cout << h_x(i) << " ";
+    }
+    std::cout << std::endl;
 }
 
 /*
@@ -1043,14 +1048,14 @@ void debug_A2_implementations() {
         std::cout << h_result_orig(i) << " ";
     }
     std::cout << "\n\nShuffled multiplication results (first block):\n";
-    for(int i = 0; i <= total_size; i++) {
+    for(int i = 0; i < total_size; i++) {
         std::cout << h_result_unshuf(i) << " ";
     }
     std::cout << "\n";
 
     // Now test implicit solve
     double theta = 0.8;
-    double delta_t = 1.0/20;
+    double delta_t = 1.0/40;
     A2_original.build_implicit(theta, delta_t);
     A2_shuffled.build_implicit(theta, delta_t);
 
@@ -1087,7 +1092,7 @@ void debug_A2_implementations() {
         std::cout << h_x_orig(i) << " ";
     }
     std::cout << "\n\nShuffled solve results (first block):\n";
-    for(int i = 0; i <= total_size; i++) {
+    for(int i = 0; i < total_size; i++) {
         std::cout << h_x_unshuf(i) << " ";
     }
     std::cout << "\n";
@@ -1535,8 +1540,8 @@ void test_heston_A2_mat(){
 
             //test_shuffle_functions();
 
-            //compare_A2_implementations();
-            debug_A2_implementations();
+            compare_A2_implementations();
+            //debug_A2_implementations();
             //compare_A2_matrices();
             //test_A2_implementations();
 

@@ -3,6 +3,7 @@
 
 #include <Kokkos_Core.hpp>
 #include "grid.hpp"
+#include "grid_pod.hpp"
 
 // Build the A2 matrix diagonals on device
 template <class MDView, class LDView, class L2DView, class UDView, class U2DView,
