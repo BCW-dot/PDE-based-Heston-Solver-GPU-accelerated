@@ -833,8 +833,8 @@ void compare_A2_implementations() {
     using timer = std::chrono::high_resolution_clock;
 
     // Test dimensions
-    const int m1 = 300;
-    const int m2 = 100;
+    const int m1 = 50;
+    const int m2 = 25;
     std::cout << "Testing A2 implementations with dimensions m1=" << m1 << ", m2=" << m2 << "\n\n";
 
     // Create grid and parameters

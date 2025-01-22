@@ -731,14 +731,14 @@ void test_a1_multiple_instances(){
     double S_0 = K;
     double V_0 = 0.04;
     
-    const int m1 = 100;
+    const int m1 = 150;
     const int m2 = 75;
     std::cout << "A1 Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     double theta = 0.8;
     double delta_t = 1.0/40.0;
 
-    int nInstances = 20;
+    int nInstances = 1000;
     std::cout << "Instances: " << nInstances << std::endl;      
 
     /*
@@ -847,10 +847,15 @@ void test_a1_multiple_instances(){
 
     //auto t_start = timer::now();
 
-    const int NUM_RUNS = 20;  // Number of timing runs
+    const int NUM_RUNS = 5;  // Number of timing runs
     std::vector<double> timings(NUM_RUNS);
 
     // Run multiple times for timing
+    /*
+    
+    Here comes the Test
+
+    */
     for(int run = 0; run < NUM_RUNS; run++) {
         auto t_start = timer::now();
         
@@ -926,69 +931,6 @@ void test_a1_multiple_instances(){
     std::cout << "Average time: " << avg_time << " seconds\n";
     std::cout << "Standard deviation: " << std_dev << " seconds\n";
 
-    /*
-    Kokkos::parallel_for("build_and_solve_all", policy, KOKKOS_LAMBDA(const member_type& team)
-    {
-        const int instance = team.league_rank();  // which PDE instance are we?
-
-        // 1) Subview the diagonals for this instance
-        auto mainDiag_i = Kokkos::subview(main_diag, instance, Kokkos::ALL, Kokkos::ALL);
-        auto lowerDiag_i = Kokkos::subview(lower_diag, instance, Kokkos::ALL, Kokkos::ALL);
-        auto upperDiag_i = Kokkos::subview(upper_diag, instance, Kokkos::ALL, Kokkos::ALL);
-
-        auto implMain_i = Kokkos::subview(impl_main_diag, instance, Kokkos::ALL, Kokkos::ALL);
-        auto implLower_i = Kokkos::subview(impl_lower_diag, instance, Kokkos::ALL, Kokkos::ALL);
-        auto implUpper_i = Kokkos::subview(impl_upper_diag, instance, Kokkos::ALL, Kokkos::ALL);
-
-        // 2) Subview the solution and RHS for this instance
-        auto x_i      = Kokkos::subview(x, instance, Kokkos::ALL);
-        auto b_i      = Kokkos::subview(b, instance, Kokkos::ALL);
-        auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);
-
-        // Possibly we need a 2D subview for 'temp'
-        auto temp_i = Kokkos::subview(temp, instance, Kokkos::ALL, Kokkos::ALL);
-
-        // Retrieve the grid for this instance
-        GridViews grid_i = deviceGrids(instance);
-
-        // PDE parameters (could vary per instance)
-        double r_d   = 0.025;
-        double r_f   = 0.0;
-
-        // 3) Now build the diagonals for this instance
-        build_a1_diagonals(
-            mainDiag_i, lowerDiag_i, upperDiag_i,
-            implMain_i, implLower_i, implUpper_i,
-            grid_i, theta, delta_t, r_d, r_f,
-            team
-        );
-        
-        
-        // 4) Multiply: A * x_i = result_i
-        //    (Each instance does the same PDE steps, but with its own data)
-        device_multiply_parallel_s_and_v(
-            mainDiag_i, lowerDiag_i, upperDiag_i,
-            x_i, result_i,
-            team
-        );
-
-        // 5) Solve: (I - theta*dt*A)*x_i = b_i
-        device_solve_implicit_parallel_v(
-            implMain_i, implLower_i, implUpper_i,
-            x_i, temp_i, b_i,
-            team
-        );
-        team.team_barrier();
-    });
-    Kokkos::fence();
-    */
-    
-
-    //auto t_end = timer::now();
-    //std::cout << "ENTIRE KERNEL: "
-              //<< std::chrono::duration<double>(t_end - t_start).count()
-              //<< " seconds" << std::endl;
-
 
     ////////////////////////////////////////////////////////////
     // 1) Multiply again: result_i = A_i * x_i
@@ -1029,7 +971,7 @@ void test_a1_multiple_instances(){
     ////////////////////////////////////////////////////////////
     // 3) Compute the residual on the host for each instance
     ////////////////////////////////////////////////////////////
-    for(int inst = 0; inst < min(5,nInstances); ++inst) {
+    for(int inst = 0; inst < min(1,nInstances); ++inst) {
 
         double residual_sum = 0.0;
         for(int idx = 0; idx < total_size; idx++) {

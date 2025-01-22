@@ -818,8 +818,8 @@ void test_a2_multiple_instances() {
     double V_0 = 0.04;
 
     // Test parameters (same as A1 test)
-    const int m1 = 50;
-    const int m2 = 25;
+    const int m1 = 150;
+    const int m2 = 75;
     std::cout << "A2 Dimension StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     // Test parameters
@@ -832,7 +832,7 @@ void test_a2_multiple_instances() {
     const double delta_t = 1.0/40;
 
     // Initialize vectors with grid views and diagonals
-    const int nInstances = 1000;          // Same number as A1 test
+    const int nInstances = 100;          // Same number as A1 test
     std::cout << "Instances: " << nInstances << std::endl;
 
     // Initialize vectors with grid views and diagonals
@@ -908,8 +908,8 @@ void test_a2_multiple_instances() {
     auto h_b = Kokkos::create_mirror_view(b);
     for(int inst = 0; inst < nInstances; ++inst) {
         for(int idx = 0; idx < total_size; ++idx) {
-            h_x(inst, idx) = idx + 1;//(double)std::rand() / RAND_MAX;
-            h_b(inst, idx) = idx + 1;//(double)std::rand() / RAND_MAX;
+            h_x(inst, idx) = (double)std::rand() / RAND_MAX;
+            h_b(inst, idx) = (double)std::rand() / RAND_MAX;
         }
     }
     Kokkos::deep_copy(x, h_x);
@@ -924,7 +924,7 @@ void test_a2_multiple_instances() {
     using member_type = team_policy::member_type;
     team_policy policy(nInstances, Kokkos::AUTO);
 
-    const int NUM_RUNS = 40;
+    const int NUM_RUNS = 3;
     std::vector<double> timings(NUM_RUNS);
     
     auto total_t_start = timer::now();
@@ -993,6 +993,7 @@ void test_a2_multiple_instances() {
         auto t_end = timer::now();
         timings[run] = std::chrono::duration<double>(t_end - t_start).count();
     }
+    
     auto total_t_end = timer::now();
 
     std::cout << "Total loop time: "
