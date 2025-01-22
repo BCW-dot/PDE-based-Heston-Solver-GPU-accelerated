@@ -258,7 +258,7 @@ struct DeviceADISolver {
 };
 
 
-
+//this is somewhere not computing the residual correctly
 void test_device_adi_multiple_instances() {
     using timer = std::chrono::high_resolution_clock;
     using Device = Kokkos::DefaultExecutionSpace;
@@ -410,9 +410,14 @@ void test_device_adi_multiple_instances() {
     }
 }
 
+//this works
 void debugging_test_device_adi_multiple_instances() {
    using timer = std::chrono::high_resolution_clock;
    using Device = Kokkos::DefaultExecutionSpace;
+
+    double K = 100.0;
+    double S_0 = K;
+    double V_0 = 0.04;
 
    // Test parameters 
    const int m1 = 150;
@@ -444,6 +449,7 @@ void debugging_test_device_adi_multiple_instances() {
        auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
        auto h_Delta_v = Kokkos::create_mirror_view(hostGrids[i].device_Delta_v);
 
+       //Grid tempGrid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
        Grid tempGrid = create_test_grid(m1, m2);
        
        for(int j = 0; j <= m1; j++) h_Vec_s(j) = tempGrid.Vec_s[j];
@@ -472,8 +478,8 @@ void debugging_test_device_adi_multiple_instances() {
    auto h_b = Kokkos::create_mirror_view(b);
    for(int inst = 0; inst < nInstances; ++inst) {
        for(int idx = 0; idx < total_size; ++idx) {
-           h_x(inst, idx) = (double)std::rand() / RAND_MAX;
-           h_b(inst, idx) = (double)std::rand() / RAND_MAX;
+           h_x(inst, idx) = 1.0;//(double)std::rand() / RAND_MAX;
+           h_b(inst, idx) = 2.0;//(double)std::rand() / RAND_MAX;
        }
    }
    Kokkos::deep_copy(x, h_x);
@@ -537,7 +543,7 @@ void debugging_test_device_adi_multiple_instances() {
    Kokkos::deep_copy(h_x, x);
    Kokkos::deep_copy(h_b, b);
 
-   for(int inst = 0; inst < std::min(1, nInstances); ++inst) {
+   for(int inst = 0; inst < std::min(5, nInstances); ++inst) {
        double residual_sum = 0.0;
        for(int idx = 0; idx < total_size; idx++) {
            double res = h_x(inst, idx) - theta * delta_t * h_verify(inst, idx) - h_b(inst, idx);
@@ -547,7 +553,7 @@ void debugging_test_device_adi_multiple_instances() {
        
        std::cout << "Instance " << inst << " => residual norm = " << residual << std::endl;
        std::cout << "  x[0..4] = ";
-       for(int i = 0; i < std::min(20,total_size); i++) {
+       for(int i = 0; i < std::min(10,total_size); i++) {
            std::cout << h_x(inst, i) << " ";
        }
        std::cout << "\n------------------------------------\n";

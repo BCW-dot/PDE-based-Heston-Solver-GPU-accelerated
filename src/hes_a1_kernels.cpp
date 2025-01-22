@@ -615,6 +615,10 @@ void test_a1_multiple_instances(){
     double K = 100.0;
     double S_0 = K;
     double V_0 = 0.04;
+
+    // PDE parameters (could vary per instance)
+    double r_d   = 0.025;
+    double r_f   = 0.0;
     
     const int m1 = 150;
     const int m2 = 75;
@@ -623,7 +627,7 @@ void test_a1_multiple_instances(){
     double theta = 0.8;
     double delta_t = 1.0/40.0;
 
-    int nInstances = 10;
+    int nInstances = 100;
     std::cout << "Instances: " << nInstances << std::endl;      
 
     /*
@@ -707,8 +711,8 @@ void test_a1_multiple_instances(){
     for(int inst = 0; inst < nInstances; ++inst) {
         for(int idx = 0; idx < total_size; ++idx) {
             // Example: each instance has a unique offset so we can see it's not all zero
-            double val_x = (double)std::rand() / RAND_MAX;//1.0+idx;//(inst + 1.0) + 0.001 * idx;
-            double val_b = (double)std::rand() / RAND_MAX;//total_size - idx;//(inst + 2.0) + 0.002 * idx;
+            double val_x = 1.0;//(double)std::rand() / RAND_MAX;//1.0+idx;//(inst + 1.0) + 0.001 * idx;
+            double val_b = 2.0;//(double)std::rand() / RAND_MAX;//total_size - idx;//(inst + 2.0) + 0.002 * idx;
 
             h_x(inst, idx) = val_x;
             h_b(inst, idx) = val_b;
@@ -767,10 +771,6 @@ void test_a1_multiple_instances(){
 
             // Retrieve the grid for this instance
             GridViews grid_i = deviceGrids(instance);
-
-            // PDE parameters (could vary per instance)
-            double r_d   = 0.025;
-            double r_f   = 0.0;
 
             // 3) Now build the diagonals for this instance
             build_a1_diagonals(
@@ -856,7 +856,7 @@ void test_a1_multiple_instances(){
     ////////////////////////////////////////////////////////////
     // 3) Compute the residual on the host for each instance
     ////////////////////////////////////////////////////////////
-    for(int inst = 0; inst < min(1,nInstances); ++inst) {
+    for(int inst = 0; inst < min(5,nInstances); ++inst) {
 
         double residual_sum = 0.0;
         for(int idx = 0; idx < total_size; idx++) {
@@ -874,12 +874,10 @@ void test_a1_multiple_instances(){
                     << " => residual norm = " << residual_norm << std::endl;
 
         // (Optional) print first ~5 solution values
-        /*
         std::cout << "  x[0..4] = ";
-        for(int i = 0; i < std::min(20,total_size); i++){
+        for(int i = 0; i < std::min(10,total_size); i++){
             std::cout << h_x(inst, i) << " ";
         }
-        */
         std::cout << "\n------------------------------------\n";
     }
 }
