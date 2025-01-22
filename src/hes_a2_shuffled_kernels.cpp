@@ -134,7 +134,7 @@ template<class View2D_const_main, class View2D_const_lower,
          class View2D_const_lower2, class View2D_const_upper,
          class View2D_const_upper2, class View1D_x, class View1D_result>
 KOKKOS_FUNCTION
-void device_multiply_shuffled(
+void a2_device_multiply_shuffled(
     const View2D_const_main& main_diag,
     const View2D_const_lower& lower_diag,
     const View2D_const_lower2& lower2_diag,
@@ -215,7 +215,7 @@ template<class View2D_const_main, class View2D_const_lower,
          class View2D_c, class View2D_c2, class View2D_d,
          class View1D_b>
 KOKKOS_FUNCTION
-void device_solve_implicit_shuffled(
+void a2_device_solve_implicit_shuffled(
     const View2D_const_main& impl_main_diag,
     const View2D_const_lower& impl_lower_diag,
     const View2D_const_lower2& impl_lower2_diag,
@@ -375,7 +375,7 @@ void test_a2_build() {
     
     Kokkos::parallel_for("test_multiply", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_multiply_shuffled(
+            a2_device_multiply_shuffled(
                 main_diag, lower_diag, lower2_diag, upper_diag, upper2_diag,
                 x, result,
                 team);
@@ -397,7 +397,7 @@ void test_a2_build() {
     
     Kokkos::parallel_for("test_implicit_solve", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_solve_implicit_shuffled(
+            a2_device_solve_implicit_shuffled(
                 impl_main_diag, impl_lower_diag, impl_lower2_diag, 
                 impl_upper_diag, impl_upper2_diag,
                 x, c_prime, c2_prime, d_prime, b,
@@ -415,7 +415,7 @@ void test_a2_build() {
     
     Kokkos::parallel_for("verify_implicit", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_multiply_shuffled(
+            a2_device_multiply_shuffled(
                 main_diag, lower_diag, lower2_diag, upper_diag, upper2_diag,
                 x, result,
                 team);
@@ -543,7 +543,7 @@ void test_a2_shuffled_structure_function() {
     std::cout << "\nTesting multiplication:\n";
     Kokkos::parallel_for("multiply", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_multiply_shuffled(
+            a2_device_multiply_shuffled(
                 main_diag, lower_diag, lower2_diag, upper_diag, upper2_diag,
                 x_shuffled, result,
                 team);
@@ -600,7 +600,7 @@ void test_a2_shuffled_structure_function() {
     std::cout << "\nTesting implicit solve:\n";
     Kokkos::parallel_for("implicit_solve", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_solve_implicit_shuffled(
+            a2_device_solve_implicit_shuffled(
                 impl_main_diag, impl_lower_diag, impl_lower2_diag,
                 impl_upper_diag, impl_upper2_diag,
                 x_shuffled, c_prime, c2_prime, d_prime, b_shuffled,
@@ -975,14 +975,14 @@ void test_a2_multiple_instances() {
                 );
 
                 // Multiply
-                device_multiply_shuffled(
+                a2_device_multiply_shuffled(
                     mainDiag_i, lowerDiag_i, lower2Diag_i, upperDiag_i, upper2Diag_i,
                     x_i, result_i,
                     team
                 );
 
                 // Solve implicit system
-                device_solve_implicit_shuffled(
+                a2_device_solve_implicit_shuffled(
                     implMain_i, implLower_i, implLower2_i, implUpper_i, implUpper2_i,
                     x_i, c_prime_i, c2_prime_i, d_prime_i, b_i,
                     team
@@ -1028,7 +1028,7 @@ void test_a2_multiple_instances() {
             auto x_i = Kokkos::subview(x, instance, Kokkos::ALL);
             auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);
 
-            device_multiply_shuffled(
+            a2_device_multiply_shuffled(
                 mainDiag_i, lowerDiag_i, lower2Diag_i, upperDiag_i, upper2Diag_i,
                 x_i, result_i,
                 team
@@ -1252,7 +1252,7 @@ void test_a2_shuffled_single_instance_debug() {
     Kokkos::parallel_for("multiply_shuffled", policy,
         KOKKOS_LAMBDA(const member_type& team) {
             int instance = team.league_rank();
-            device_multiply_shuffled(
+            a2_device_multiply_shuffled(
                 Kokkos::subview(main_diag,   instance, Kokkos::ALL, Kokkos::ALL),
                 Kokkos::subview(lower_diag,  instance, Kokkos::ALL, Kokkos::ALL),
                 Kokkos::subview(lower2_diag, instance, Kokkos::ALL, Kokkos::ALL),
@@ -1337,7 +1337,7 @@ void test_a2_shuffled_single_instance_debug() {
     Kokkos::parallel_for("implicit_solve_shuffled", policy,
         KOKKOS_LAMBDA(const member_type& team) {
             int instance = team.league_rank();
-            device_solve_implicit_shuffled(
+            a2_device_solve_implicit_shuffled(
                 Kokkos::subview(impl_main_diag,   instance, Kokkos::ALL, Kokkos::ALL),
                 Kokkos::subview(impl_lower_diag,  instance, Kokkos::ALL, Kokkos::ALL),
                 Kokkos::subview(impl_lower2_diag, instance, Kokkos::ALL, Kokkos::ALL),
@@ -1490,7 +1490,7 @@ void test_heston_A2_shuffled_class_free() {
             );
 
             // Solve implicit system
-            device_solve_implicit_shuffled(
+            a2_device_solve_implicit_shuffled(
                 impl_main_diag, impl_lower_diag, impl_lower2_diag, impl_upper_diag, impl_upper2_diag,
                 x, c_prime, c2_prime, d_prime, b,
                 team
@@ -1508,7 +1508,7 @@ void test_heston_A2_shuffled_class_free() {
     
     Kokkos::parallel_for("multiply", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_multiply_shuffled(
+            a2_device_multiply_shuffled(
                 main_diag, lower_diag, lower2_diag, upper_diag, upper2_diag,
                 x, result,
                 team
@@ -1551,10 +1551,10 @@ void test_a2_shuffled_kernel(){
                 //test_a2_shuffled_structure_function();
                 //compare_a2_diagonal_kernels();
 
-                test_a2_multiple_instances();
+                //test_a2_multiple_instances();
                 //test_a2_shuffled_single_instance_debug();
 
-                //test_heston_A2_shuffled_class_free();
+                test_heston_A2_shuffled_class_free();
             }
             catch (std::exception& e) {
                 std::cout << "Error: " << e.what() << std::endl;

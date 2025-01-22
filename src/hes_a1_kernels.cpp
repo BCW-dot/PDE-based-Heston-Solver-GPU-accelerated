@@ -203,10 +203,9 @@ template<
     class View2D_const_lower,
     class View2D_const_upper,
     class View1D_x,           // e.g. Kokkos::View<double*, ...>
-    class View1D_result
->
+    class View1D_result>
 KOKKOS_FUNCTION
-void device_multiply_parallel_s_and_v(
+void a1_device_multiply_parallel_v(
     const View2D_const_main&  main_diag,
     const View2D_const_lower& lower_diag,
     const View2D_const_upper& upper_diag,
@@ -276,10 +275,9 @@ template<
     class View2D_const_upper,
     class View1D_x,     // x is 1D
     class View2D_temp,  // temp is rank-2
-    class View1D_b
->
+    class View1D_b>
 KOKKOS_FUNCTION
-void device_solve_implicit_parallel_v(
+void a1_device_solve_implicit_parallel_v(
     const View2D_const_main&  impl_main,
     const View2D_const_lower& impl_lower,
     const View2D_const_upper& impl_upper,
@@ -406,7 +404,7 @@ void test_a1_build() {
     Kokkos::parallel_for("test_multiply", policy,
         KOKKOS_LAMBDA(const member_type& team)
         {
-            device_multiply_parallel_s_and_v(
+            a1_device_multiply_parallel_v(
                 main_diag, lower_diag, upper_diag,
                 x, 
                 result,  // input x, output result
@@ -438,7 +436,7 @@ void test_a1_build() {
     t_start = timer::now();
     Kokkos::parallel_for("test_implicit_solve", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-        device_solve_implicit_parallel_v(
+        a1_device_solve_implicit_parallel_v(
             impl_main_diag, impl_lower_diag, impl_upper_diag,
             x, temp, b,  // Use the non-const copies
             team);
@@ -464,7 +462,7 @@ void test_a1_build() {
     Kokkos::parallel_for("verify_implicit", policy,
         KOKKOS_LAMBDA(const member_type& team)
         {
-            device_multiply_parallel_s_and_v(
+            a1_device_multiply_parallel_v(
                 main_diag, lower_diag, upper_diag,
                 x, result,
                 team);
@@ -682,7 +680,7 @@ void test_a1_structure_function() {
     Kokkos::parallel_for("test_multiply", policy,
         KOKKOS_LAMBDA(const member_type& team)
         {
-            device_multiply_parallel_s_and_v(
+            a1_device_multiply_parallel_v(
                 main_diag, lower_diag, upper_diag,
                 x, result,
                 team);
@@ -705,7 +703,7 @@ void test_a1_structure_function() {
 
     Kokkos::parallel_for("test_implicit_solve", policy,
         KOKKOS_LAMBDA(const member_type& team) {
-            device_solve_implicit_parallel_v(
+            a1_device_solve_implicit_parallel_v(
                 impl_main_diag, impl_lower_diag, impl_upper_diag,
                 x, temp, b,
                 team);
@@ -898,14 +896,14 @@ void test_a1_multiple_instances(){
             
             // 4) Multiply: A * x_i = result_i
             //    (Each instance does the same PDE steps, but with its own data)
-            device_multiply_parallel_s_and_v(
+            a1_device_multiply_parallel_v(
                 mainDiag_i, lowerDiag_i, upperDiag_i,
                 x_i, result_i,
                 team
             );
 
             // 5) Solve: (I - theta*dt*A)*x_i = b_i
-            device_solve_implicit_parallel_v(
+            a1_device_solve_implicit_parallel_v(
                 implMain_i, implLower_i, implUpper_i,
                 x_i, temp_i, b_i,
                 team
@@ -949,7 +947,7 @@ void test_a1_multiple_instances(){
     auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);
 
     // Reuse your multiply function
-    device_multiply_parallel_s_and_v(
+    a1_device_multiply_parallel_v(
         mainDiag_i, lowerDiag_i, upperDiag_i,
         x_i, result_i,
         team
@@ -1072,16 +1070,16 @@ void test_speed_instances_vs_single() {
                 grid, theta, dt, r_d, r_f,
                 team);
 
-            device_multiply_parallel_s_and_v(
-                main_diag, lower_diag, upper_diag,
-                x, 
-                result,  // input x, output result
-                team);
+                a1_device_multiply_parallel_v(
+                    main_diag, lower_diag, upper_diag,
+                    x, 
+                    result,  // input x, output result
+                    team);
 
-            device_solve_implicit_parallel_v(
-            impl_main_diag, impl_lower_diag, impl_upper_diag,
-            x, temp, b,  // Use the non-const copies
-            team);
+                a1_device_solve_implicit_parallel_v(
+                    impl_main_diag, impl_lower_diag, impl_upper_diag,
+                    x, temp, b,  // Use the non-const copies
+                    team);
             });
         Kokkos::fence();
         

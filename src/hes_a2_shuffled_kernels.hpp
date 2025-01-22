@@ -35,7 +35,7 @@ template<class View2D_const_main, class View2D_const_lower,
          class View2D_const_lower2, class View2D_const_upper,
          class View2D_const_upper2, class View1D_x, class View1D_result>
 KOKKOS_FUNCTION
-void device_multiply_shuffled(
+void a2_device_multiply_shuffled(
     const View2D_const_main& main_diag,
     const View2D_const_lower& lower_diag,
     const View2D_const_lower2& lower2_diag,
@@ -52,7 +52,7 @@ template<class View2D_const_main, class View2D_const_lower,
          class View2D_c, class View2D_c2, class View2D_d,
          class View1D_b>
 KOKKOS_FUNCTION
-void device_solve_implicit_shuffled(
+void a2_device_solve_implicit_shuffled(
     const View2D_const_main& impl_main_diag,
     const View2D_const_lower& impl_lower_diag,
     const View2D_const_lower2& impl_lower2_diag,

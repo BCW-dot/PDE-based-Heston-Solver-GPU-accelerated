@@ -23,6 +23,39 @@ void build_a1_diagonals(
     const double r_f,
     const Kokkos::TeamPolicy<>::member_type& team);
 
+//name is missleading, we are just parallising in v
+template<
+    class View2D_const_main,  // e.g. Kokkos::View<const double**, LayoutStride, ...>
+    class View2D_const_lower,
+    class View2D_const_upper,
+    class View1D_x,           // e.g. Kokkos::View<double*, ...>
+    class View1D_result>
+KOKKOS_FUNCTION
+void a1_device_multiply_parallel_v(
+    const View2D_const_main&  main_diag,
+    const View2D_const_lower& lower_diag,
+    const View2D_const_upper& upper_diag,
+    const View1D_x&           x,
+    const View1D_result&      result,
+    const Kokkos::TeamPolicy<>::member_type& team);
+
+template<
+    class View2D_const_main,
+    class View2D_const_lower,
+    class View2D_const_upper,
+    class View1D_x,     // x is 1D
+    class View2D_temp,  // temp is rank-2
+    class View1D_b>
+KOKKOS_FUNCTION
+void a1_device_solve_implicit_parallel_v(
+    const View2D_const_main&  impl_main,
+    const View2D_const_lower& impl_lower,
+    const View2D_const_upper& impl_upper,
+    const View1D_x&           x,
+    const View2D_temp&        temp,
+    const View1D_b&           b,
+    const Kokkos::TeamPolicy<>::member_type& team);
+
 void test_a1_kernel();
 
 #endif

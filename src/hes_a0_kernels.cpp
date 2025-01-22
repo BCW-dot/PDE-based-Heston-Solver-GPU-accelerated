@@ -221,11 +221,11 @@ void test_a0_multiple_instances() {
     using timer = std::chrono::high_resolution_clock;
 
     // Test dimensions
-    const int m1 = 5;
-    const int m2 = 5;
+    const int m1 = 100;
+    const int m2 = 50;
     
     // Number of PDE instances to solve
-    int nInstances = 5;
+    int nInstances = 100;
 
     // Test parameters
     const double rho = -0.9;
@@ -382,9 +382,9 @@ void test_a0_multiple_instances() {
     Kokkos::deep_copy(h_result, result);
 
     // Print first few results for each instance
-    for(int inst = 0; inst < nInstances; inst++) {
+    for(int inst = 0; inst < min(1,nInstances); inst++) {
         std::cout << "\nInstance " << inst << " first few results:\n";
-        for(int i = 0; i < std::min(50, total_size); i++) {
+        for(int i = 0; i < std::min(10, total_size); i++) {
             std::cout << h_result(inst, i) << " ";
         }
         std::cout << "\n------------------------------------\n";
