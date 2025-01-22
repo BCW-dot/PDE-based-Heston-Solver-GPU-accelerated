@@ -6,121 +6,8 @@
 #include <numeric>   // For std::accumulate
 #include "grid_pod.hpp"
 
-//void buildMultipleGridViews(std::vector<GridViews> &hostGrids,int nInstances, int m1, int m2);
-
-//runs on the cpu for testing
-/*
-KOKKOS_FUNCTION
-void build_a1_diagonals(
-    const Kokkos::View<double**>& main_diag,
-    const Kokkos::View<double**>& lower_diag,
-    const Kokkos::View<double**>& upper_diag,
-    const Kokkos::View<double**>& impl_main_diag,
-    const Kokkos::View<double**>& impl_lower_diag,
-    const Kokkos::View<double**>& impl_upper_diag,
-    const Grid& grid,
-    const double theta,
-    const double dt,
-    const double r_d,
-    const double r_f)
-{
-    // Get dimensions
-    const int m1 = main_diag.extent(1) - 1;
-    const int m2 = main_diag.extent(0) - 1;
-
-    // Parallel over variance levels
-    Kokkos::parallel_for(m2 + 1, KOKKOS_LAMBDA(const int j) {
-        // First point (i=0) is boundary
-        main_diag(j,0) = 0.0;
-        impl_main_diag(j,0) = 1.0;
-        if(j < m2) {
-            upper_diag(j,0) = 0.0;
-            impl_upper_diag(j,0) = 0.0;
-        }
-
-        // Interior points
-        for(int i = 1; i < m1; i++) {
-            // Compute PDE coefficients
-            const double s = grid.device_Vec_s[i];
-            const double v = grid.device_Vec_v[j];
-            
-            // a = 0.5*s^2*v (diffusion)
-            // b = (r_d - r_f)*s (drift)
-            const double a = 0.5 * s * s * v;
-            const double b = (r_d - r_f) * s;
-
-            // Build explicit diagonals using central differences
-            // PDE coefficients
-
-            // Build tridiagonal system for this level
-            // Lower diagonal
-            lower_diag(j,i-1) = a * device_delta_s(i-1, -1, grid.device_Delta_s) + 
-                                b * device_beta_s(i-1, -1, grid.device_Delta_s);
-            
-            // Main diagonal
-            main_diag(j,i) = a * device_delta_s(i-1, 0, grid.device_Delta_s) + 
-                                b * device_beta_s(i-1, 0, grid.device_Delta_s) - 0.5 * r_d;
-            
-            // Upper diagonal
-            upper_diag(j,i) = a * device_delta_s(i-1, 1, grid.device_Delta_s) + 
-                                b * device_beta_s(i-1, 1, grid.device_Delta_s);
-
-            // Build implicit diagonals: (I - theta*dt*A)
-            impl_lower_diag(j,i-1) = -theta * dt * lower_diag(j,i-1);
-            impl_main_diag(j,i) = 1.0 - theta * dt * main_diag(j,i);
-            impl_upper_diag(j,i) = -theta * dt * upper_diag(j,i);
-        }
-
-        // Last point (i=m1)
-        main_diag(j,m1) = -0.5 * r_d;
-        impl_main_diag(j,m1) = 1.0 - theta * dt * main_diag(j,m1);
-        lower_diag(j,m1-1) = 0.0;
-        impl_lower_diag(j,m1-1) = 0.0;
-    });
-}
-*/
-
-
-//storage
-/*
-KOKKOS_FUNCTION
-void build_a1_diagonals(
-    const Kokkos::View<double**>& main_diag,
-    const Kokkos::View<double**>& lower_diag,
-    const Kokkos::View<double**>& upper_diag,
-    const Kokkos::View<double**>& impl_main_diag,
-    const Kokkos::View<double**>& impl_lower_diag,
-    const Kokkos::View<double**>& impl_upper_diag,
-    const Grid& grid,
-    const double theta,
-    const double dt,
-    const double r_d,
-    const double r_f,
-    const Kokkos::TeamPolicy<>::member_type& team)
-
-    KOKKOS_FUNCTION
-void device_multiply_parallel_s_and_v(
-    const Kokkos::View<const double**>& main_diag,
-    const Kokkos::View<const double**>& lower_diag,
-    const Kokkos::View<const double**>& upper_diag,
-    const Kokkos::View<double*>& x,
-    const Kokkos::View<double*>& result,  // Changed to const
-    const Kokkos::TeamPolicy<>::member_type& team)
-
-    KOKKOS_FUNCTION
-void device_solve_implicit_parallel_v(
-    const Kokkos::View<const double**>& impl_main,
-    const Kokkos::View<const double**>& impl_lower,
-    const Kokkos::View<const double**>& impl_upper,
-    const Kokkos::View<double*>& x,         // Changed to const -> means that the memory address will not be changed, but the values can be modified
-    const Kokkos::View<double**>& temp,     // Changed to const
-    const Kokkos::View<double*>& b,
-    const Kokkos::TeamPolicy<>::member_type& team)
-
-*/
 
 //test build for parallel device
-
 template <class MDView, class LDView, class UDView,
           class IMDView, class ILDView, class IUDView,
           class GridType>  // New template parameter for Grid type
@@ -736,7 +623,7 @@ void test_a1_multiple_instances(){
     double theta = 0.8;
     double delta_t = 1.0/40.0;
 
-    int nInstances = 1000;
+    int nInstances = 10;
     std::cout << "Instances: " << nInstances << std::endl;      
 
     /*
@@ -1216,7 +1103,6 @@ void test_myGrids()
   });
   Kokkos::fence();
 }
-
 
 
 
