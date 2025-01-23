@@ -110,7 +110,7 @@ This is a first impleemntation of the a1 class
 #include "grid_pod.hpp"
 
 template<class DeviceType>
-struct DeviceADISolver {
+struct Device_A1_heston {
     typedef DeviceType execution_space;
     typedef typename DeviceType::memory_space memory_space;
     
@@ -129,9 +129,9 @@ struct DeviceADISolver {
     // Dimensions and parameters
     int m1, m2;
     
-    KOKKOS_FUNCTION DeviceADISolver() = default;
+    KOKKOS_FUNCTION Device_A1_heston() = default;
 
-    DeviceADISolver(int m1_in, int m2_in) : m1(m1_in), m2(m2_in) {
+    Device_A1_heston(int m1_in, int m2_in) : m1(m1_in), m2(m2_in) {
         main_diags = Kokkos::View<double**>("A1_main_diags", m2+1, m1+1);
         lower_diags = Kokkos::View<double**>("A1_lower_diags", m2+1, m1);
         upper_diags = Kokkos::View<double**>("A1_upper_diags", m2+1, m1);
@@ -258,157 +258,6 @@ struct DeviceADISolver {
 };
 
 
-//this is somewhere not computing the residual correctly
-void test_device_adi_multiple_instances() {
-    using timer = std::chrono::high_resolution_clock;
-    using Device = Kokkos::DefaultExecutionSpace;
-
-    const int m1 = 100;  
-    const int m2 = 50;   
-    std::cout << "A1 Dimension StockxVariance: " << m1+1 << "x" << m2+1 << "\n";
-
-    const double theta = 0.8;
-    const double delta_t = 1.0/40.0;
-    const double r_d = 0.025;
-    const double r_f = 0.0;
-
-    const int nInstances = 10;
-    std::cout << "Instances: " << nInstances << "\n";
-
-    // Create solver array
-    // Create solver array as a Kokkos::View instead
-    Kokkos::View<DeviceADISolver<Device>*> solvers_d("solvers_d", nInstances);
-    auto solvers_h = Kokkos::create_mirror_view(solvers_d);
-
-    // Initialize solvers on host
-    for(int i = 0; i < nInstances; ++i) {
-        // Use placement new to construct solver in device memory
-        new (&solvers_h(i)) DeviceADISolver<Device>(m1, m2);
-    }
-
-    // Copy to device
-    Kokkos::deep_copy(solvers_d, solvers_h);
-
-    // Initialize vectors with grid views
-    std::vector<GridViews> hostGrids;
-    buildMultipleGridViews(hostGrids, nInstances, m1, m2);
-
-    // Fill grid values for each instance
-    for(int i = 0; i < nInstances; ++i) {
-        solvers_h(i) = DeviceADISolver<Device>(m1, m2);
-        
-        auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
-        auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[i].device_Vec_v);
-        auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
-        
-        Grid tempGrid = create_test_grid(m1, m2);
-        
-        for(int j = 0; j <= m1; j++) h_Vec_s(j) = tempGrid.Vec_s[j];
-        for(int j = 0; j <= m2; j++) h_Vec_v(j) = tempGrid.Vec_v[j];
-        for(int j = 0; j < m1; j++) h_Delta_s(j) = tempGrid.Delta_s[j];
-        
-        Kokkos::deep_copy(hostGrids[i].device_Vec_s, h_Vec_s);
-        Kokkos::deep_copy(hostGrids[i].device_Vec_v, h_Vec_v);
-        Kokkos::deep_copy(hostGrids[i].device_Delta_s, h_Delta_s);
-    }
-
-    // Create device view of GridViews
-    Kokkos::View<GridViews*> deviceGrids("deviceGrids", nInstances);
-    auto h_deviceGrids = Kokkos::create_mirror_view(deviceGrids);
-    for(int i = 0; i < nInstances; ++i) h_deviceGrids(i) = hostGrids[i];
-    Kokkos::deep_copy(deviceGrids, h_deviceGrids);
-
-    // Create test vectors
-    const int total_size = (m1+1)*(m2+1);
-    Kokkos::View<double**> x("x", nInstances, total_size);
-    Kokkos::View<double**> b("b", nInstances, total_size);
-    Kokkos::View<double**> result("result", nInstances, total_size);
-
-    // Initialize x and b
-    auto h_x = Kokkos::create_mirror_view(x);
-    auto h_b = Kokkos::create_mirror_view(b);
-    for(int inst = 0; inst < nInstances; ++inst) {
-        for(int idx = 0; idx < total_size; ++idx) {
-            h_x(inst, idx) = (double)std::rand() / RAND_MAX;
-            h_b(inst, idx) = (double)std::rand() / RAND_MAX;
-        }
-    }
-    Kokkos::deep_copy(x, h_x);
-    Kokkos::deep_copy(b, h_b);
-
-    using team_policy = Kokkos::TeamPolicy<>;
-    using member_type = team_policy::member_type;
-    team_policy policy(nInstances, Kokkos::AUTO);
-
-    const int NUM_RUNS = 5;
-    std::vector<double> timings(NUM_RUNS);
-
-    
-    for(int run = 0; run < NUM_RUNS; run++) {
-        auto t_start = timer::now();
-        
-        Kokkos::parallel_for("solve_all_instances", policy,
-            KOKKOS_LAMBDA(const member_type& team) {
-                const int instance = team.league_rank();
-                
-                // Get solver and subviews
-                DeviceADISolver<Device>& solver = solvers_d(instance);
-                auto x_i = Kokkos::subview(x, instance, Kokkos::ALL);
-                auto b_i = Kokkos::subview(b, instance, Kokkos::ALL);
-                auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);
-                GridViews grid_i = deviceGrids(instance);
-                
-                // Build diagonals and solve
-                solver.build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
-                solver.multiply_parallel_v(x_i, result_i, team);
-                solver.solve_implicit_parallel_v(x_i, b_i, team);
-        });
-        Kokkos::fence();
-
-        auto t_end = timer::now();
-        timings[run] = std::chrono::duration<double>(t_end - t_start).count();
-    }
-
-    // Print timing statistics
-    double avg_time = std::accumulate(timings.begin(), timings.end(), 0.0) / NUM_RUNS;
-    double variance = 0.0;
-    for(const auto& t : timings) {
-        variance += (t - avg_time) * (t - avg_time);
-    }
-    double std_dev = std::sqrt(variance);
-
-    std::cout << "Average time: " << avg_time << " seconds\n";
-    std::cout << "Standard deviation: " << std_dev << " seconds\n";
-    
-    // Create verification array and run multiply
-    Kokkos::View<double**> verify("verify", nInstances, total_size);
-
-    Kokkos::parallel_for("verify_multiply", policy,
-        KOKKOS_LAMBDA(const member_type& team) {
-            const int instance = team.league_rank();
-            solvers_d(instance).multiply_parallel_v(
-                Kokkos::subview(x, instance, Kokkos::ALL),
-                Kokkos::subview(verify, instance, Kokkos::ALL),
-                team
-            );
-    });
-    Kokkos::fence();  // Add this
-
-    auto h_verify = Kokkos::create_mirror_view(verify);
-    Kokkos::deep_copy(h_verify, verify);
-    Kokkos::deep_copy(h_x, x);
-    Kokkos::deep_copy(h_b, b);
-
-    for(int inst = 0; inst < std::min(1, nInstances); ++inst) {
-        double residual_sum = 0.0;
-        for(int idx = 0; idx < total_size; idx++) {
-            double res = h_x(inst, idx) - theta * delta_t * h_verify(inst, idx) - h_b(inst, idx);
-            residual_sum += res * res;
-        }
-        double residual = std::sqrt(residual_sum);
-        std::cout << "Instance " << inst << " residual: " << residual << "\n";
-    }
-}
 
 //this works
 void debugging_test_device_adi_multiple_instances() {
@@ -433,10 +282,10 @@ void debugging_test_device_adi_multiple_instances() {
    std::cout << "Instances: " << nInstances << std::endl;
 
    // Create solvers array on device
-   Kokkos::View<DeviceADISolver<Device>*> solvers_d("solvers_d", nInstances);
+   Kokkos::View<Device_A1_heston<Device>*> solvers_d("solvers_d", nInstances);
    auto solvers_h = Kokkos::create_mirror_view(solvers_d);
    for(int i = 0; i < nInstances; ++i) {
-       new (&solvers_h(i)) DeviceADISolver<Device>(m1, m2);
+       new (&solvers_h(i)) Device_A1_heston<Device>(m1, m2);
    }
    Kokkos::deep_copy(solvers_d, solvers_h);
 
@@ -499,7 +348,7 @@ void debugging_test_device_adi_multiple_instances() {
            KOKKOS_LAMBDA(const member_type& team) {
                const int instance = team.league_rank();
                
-               DeviceADISolver<Device>& solver = solvers_d(instance);
+               Device_A1_heston<Device>& solver = solvers_d(instance);
                auto x_i = Kokkos::subview(x, instance, Kokkos::ALL);
                auto b_i = Kokkos::subview(b, instance, Kokkos::ALL);
                auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);

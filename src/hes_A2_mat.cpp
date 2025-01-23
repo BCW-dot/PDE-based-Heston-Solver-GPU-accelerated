@@ -1536,11 +1536,11 @@ void test_heston_A2_mat(){
             //test_heston_A2();
             //test_A2_multiply_and_implicit();
 
-            //test_heston_A2_shuffled();
+            test_heston_A2_shuffled();
 
             //test_shuffle_functions();
 
-            compare_A2_implementations();
+            //compare_A2_implementations();
             //debug_A2_implementations();
             //compare_A2_matrices();
             //test_A2_implementations();

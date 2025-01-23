@@ -41,7 +41,7 @@ int main(int argc, char* argv[]) {
     //test_grid();
 
     //test_hes_mat_fac();
-    //test_heston_A2_mat();
+    test_heston_A2_mat();
 
     //test_boundary_conditions();
 
@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
     Here come the test for the class free implementation. WE need these for the calibration code
 
     */
-    test_a1_kernel();
+    //test_a1_kernel();
     //test_a2_shuffled_kernel();
     //test_a0_kernel();
 
