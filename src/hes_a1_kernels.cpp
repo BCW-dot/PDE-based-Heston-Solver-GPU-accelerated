@@ -286,7 +286,7 @@ void test_a1_kernel(){
             //testMultipleGridViews();
             //test_myGrids();
 
-            //debugging_test_device_adi_multiple_instances();
+            debugging_test_device_adi_multiple_instances();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;

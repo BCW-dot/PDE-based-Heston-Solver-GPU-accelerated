@@ -54,14 +54,14 @@ int main(int argc, char* argv[]) {
     */
     //test_a1_kernel();
     //test_a2_shuffled_kernel();
-    test_a0_kernel();
+    //test_a0_kernel();
 
     /*
     
     Test for a device callable class
 
     */
-    //test_device_class();
+    test_device_class();
 
 
 

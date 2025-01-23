@@ -1,13 +1,21 @@
 #include <Kokkos_Core.hpp>
 #include "device_solver.hpp"
 #include <iostream>
+#include <numeric>
+
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <iomanip>
+#include <string>
+#include <vector>
 
 /*
 
 This is a basic example on hwo to use class instances in device code
 
 */
-
+/*
 template<class DeviceType>
 struct SimpleDevice {
     typedef DeviceType execution_space;
@@ -97,8 +105,372 @@ void run_device_solver_example() {
         std::cout << "Instance " << i << ": " << result_h(0) << "\n";
     }
 }
+*/
+
+//Simulating the behavior of a parallised DO scheme
+void test_combined_kernel_solvers() {
+    using timer = std::chrono::high_resolution_clock;
+    using Device = Kokkos::DefaultExecutionSpace;
+    
+    // Parameters
+    const int m1 = 50;
+    const int m2 = 50;
+    const int nInstances = 300;
+    
+    // Solver parameters
+    const int N = 20;
+    const double theta = 0.8;
+    const double delta_t = 1.0/N;
+
+    const double r_d = 0.025;
+    const double r_f = 0.0;
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double kappa = 1.5;
+    const double eta = 0.04;
+
+    std::cout << "Number of Instances: " << nInstances << std::endl;
+    std::cout << "Dimensions: m1 = " << m1 << ", m2 = " << m2 << ", time steps = " << N << std::endl;
+
+    // Create solver arrays
+    Kokkos::View<Device_A0_heston<Device>*> A0_solvers("A0_solvers", nInstances);
+    Kokkos::View<Device_A1_heston<Device>*> A1_solvers("A1_solvers", nInstances);
+    Kokkos::View<Device_A2_shuffled_heston<Device>*> A2_solvers("A2_solvers", nInstances);
+    
+    // Initialize solvers
+    auto h_A0 = Kokkos::create_mirror_view(A0_solvers);
+    auto h_A1 = Kokkos::create_mirror_view(A1_solvers);
+    auto h_A2 = Kokkos::create_mirror_view(A2_solvers);
+    
+    for(int i = 0; i < nInstances; i++) {
+        h_A0(i) = Device_A0_heston<Device>(m1, m2);
+        h_A1(i) = Device_A1_heston<Device>(m1, m2);
+        h_A2(i) = Device_A2_shuffled_heston<Device>(m1, m2);
+    }
+    Kokkos::deep_copy(A0_solvers, h_A0);
+    Kokkos::deep_copy(A1_solvers, h_A1);
+    Kokkos::deep_copy(A2_solvers, h_A2);
+
+    // Initialize grid views
+    std::vector<GridViews> hostGrids;
+    buildMultipleGridViews(hostGrids, nInstances, m1, m2);
+    for(int i = 0; i < nInstances; ++i) {
+        auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
+        auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[i].device_Vec_v);
+        auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
+        auto h_Delta_v = Kokkos::create_mirror_view(hostGrids[i].device_Delta_v);
+
+        //Grid tempGrid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+        Grid tempGrid = create_test_grid(m1, m2);
+        
+        for(int j = 0; j <= m1; j++) h_Vec_s(j) = tempGrid.Vec_s[j];
+        for(int j = 0; j <= m2; j++) h_Vec_v(j) = tempGrid.Vec_v[j];
+        for(int j = 0; j < m1; j++) h_Delta_s(j) = tempGrid.Delta_s[j];
+        for(int j = 0; j < m2; j++) h_Delta_v(j) = tempGrid.Delta_v[j];
+
+        Kokkos::deep_copy(hostGrids[i].device_Vec_s, h_Vec_s);
+        Kokkos::deep_copy(hostGrids[i].device_Vec_v, h_Vec_v);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_s, h_Delta_s);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_v, h_Delta_v);
+    }
+
+    Kokkos::View<GridViews*> deviceGrids("deviceGrids", nInstances);
+    auto h_deviceGrids = Kokkos::create_mirror_view(deviceGrids);
+    for(int i = 0; i < nInstances; ++i) h_deviceGrids(i) = hostGrids[i];
+    Kokkos::deep_copy(deviceGrids, h_deviceGrids);
+
+    // Create test vectors
+    const int total_size = (m1+1)*(m2+1);
+    Kokkos::View<double**> x("x", nInstances, total_size);
+    Kokkos::View<double**> b("b", nInstances, total_size);
+    Kokkos::View<double**> result("result", nInstances, total_size);
+
+    // Initialize test data
+    auto h_x = Kokkos::create_mirror_view(x);
+    auto h_b = Kokkos::create_mirror_view(b);
+    for(int inst = 0; inst < nInstances; ++inst) {
+        for(int idx = 0; idx < total_size; ++idx) {
+            h_x(inst, idx) = (double)std::rand() / RAND_MAX;
+            h_b(inst, idx) = (double)std::rand() / RAND_MAX;
+        }
+    }
+    Kokkos::deep_copy(x, h_x);
+    Kokkos::deep_copy(b, h_b);
+
+    // Execute solver operations
+    using team_policy = Kokkos::TeamPolicy<>;
+    using member_type = team_policy::member_type;
+    team_policy policy(nInstances, Kokkos::AUTO);
 
 
+    const int NUM_RUNS = 5;
+    std::vector<double> timings(NUM_RUNS);
+
+   for(int run = 0; run < NUM_RUNS; run++) {
+        auto t_start = timer::now();
+
+        Kokkos::parallel_for("combined_solvers", policy,
+            KOKKOS_LAMBDA(const member_type& team) {
+                const int instance = team.league_rank();
+                
+                auto x_i = Kokkos::subview(x, instance, Kokkos::ALL);
+                auto b_i = Kokkos::subview(b, instance, Kokkos::ALL);
+                auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);
+                GridViews grid_i = deviceGrids(instance);
+
+                // Build matrices (once per timestep)
+                A0_solvers(instance).build_matrix(grid_i, rho, sigma, team);
+                A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+                A2_solvers(instance).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
+
+                for(int n = 0; n < N; n++) {
+                    // Step 1: Y0 = Un + dt*(A0 + A1 + A2)Un
+                    A0_solvers(instance).multiply_parallel_s_and_v(x_i, result_i, team);
+                    A1_solvers(instance).multiply_parallel_v(x_i, result_i, team);
+                    A2_solvers(instance).multiply_parallel_s(x_i, result_i, team);
+
+                    // Step 2: (I - theta*dt*A1)Y1 = Y0
+                    A1_solvers(instance).solve_implicit_parallel_v(x_i, result_i, team);
+
+                    // Step 3: (I - theta*dt*A2)Un+1 = Y1
+                    A2_solvers(instance).solve_implicit_parallel_s(x_i, result_i, team);
+                }
+        });
+        Kokkos::fence();
+
+        auto t_end = timer::now();
+        timings[run] = std::chrono::duration<double>(t_end - t_start).count();
+    }
+
+    double avg_time = std::accumulate(timings.begin(), timings.end(), 0.0) / NUM_RUNS;
+    double variance = 0.0;
+    for(const auto& t : timings) {
+        variance += (t - avg_time) * (t - avg_time);
+    }
+    double std_dev = std::sqrt(variance);
+
+    std::cout << "Average time: " << avg_time << " seconds\n";
+    std::cout << "Standard deviation: " << std_dev << " seconds\n";
+
+}
+
+
+
+struct TestCase {
+    std::string category;
+    int m1;
+    int m2;
+    std::vector<int> instances;
+};
+
+struct TestResult {
+    std::string category;
+    int m1;
+    int m2;
+    int nInstances;
+    double avg_time;
+    double std_dev;
+};
+
+// Helper function to run a single test and return avg_time and std_dev
+TestResult run_single_test(const std::string& category, int m1, int m2, int nInstances) {
+    using timer = std::chrono::high_resolution_clock;
+    using Device = Kokkos::DefaultExecutionSpace;
+
+    // Solver parameters
+    const int N = 20;
+    const double theta = 0.8;
+    const double delta_t = 1.0 / N;
+
+    const double r_d = 0.025;
+    const double r_f = 0.0;
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double kappa = 1.5;
+    const double eta = 0.04;
+
+    // Create solver arrays
+    Kokkos::View<Device_A0_heston<Device>*> A0_solvers("A0_solvers", nInstances);
+    Kokkos::View<Device_A1_heston<Device>*> A1_solvers("A1_solvers", nInstances);
+    Kokkos::View<Device_A2_shuffled_heston<Device>*> A2_solvers("A2_solvers", nInstances);
+
+    // Initialize solvers
+    auto h_A0 = Kokkos::create_mirror_view(A0_solvers);
+    auto h_A1 = Kokkos::create_mirror_view(A1_solvers);
+    auto h_A2 = Kokkos::create_mirror_view(A2_solvers);
+
+    for(int i = 0; i < nInstances; i++) {
+        h_A0(i) = Device_A0_heston<Device>(m1, m2);
+        h_A1(i) = Device_A1_heston<Device>(m1, m2);
+        h_A2(i) = Device_A2_shuffled_heston<Device>(m1, m2);
+    }
+    Kokkos::deep_copy(A0_solvers, h_A0);
+    Kokkos::deep_copy(A1_solvers, h_A1);
+    Kokkos::deep_copy(A2_solvers, h_A2);
+
+    // Initialize grid views
+    std::vector<GridViews> hostGrids;
+    buildMultipleGridViews(hostGrids, nInstances, m1, m2);
+    for(int i = 0; i < nInstances; ++i) {
+        auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
+        auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[i].device_Vec_v);
+        auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
+        auto h_Delta_v = Kokkos::create_mirror_view(hostGrids[i].device_Delta_v);
+
+        Grid tempGrid = create_test_grid(m1, m2);
+
+        for(int j = 0; j <= m1; j++) h_Vec_s(j) = tempGrid.Vec_s[j];
+        for(int j = 0; j <= m2; j++) h_Vec_v(j) = tempGrid.Vec_v[j];
+        for(int j = 0; j < m1; j++) h_Delta_s(j) = tempGrid.Delta_s[j];
+        for(int j = 0; j < m2; j++) h_Delta_v(j) = tempGrid.Delta_v[j];
+
+        Kokkos::deep_copy(hostGrids[i].device_Vec_s, h_Vec_s);
+        Kokkos::deep_copy(hostGrids[i].device_Vec_v, h_Vec_v);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_s, h_Delta_s);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_v, h_Delta_v);
+    }
+
+    Kokkos::View<GridViews*> deviceGrids("deviceGrids", nInstances);
+    auto h_deviceGrids = Kokkos::create_mirror_view(deviceGrids);
+    for(int i = 0; i < nInstances; ++i) h_deviceGrids(i) = hostGrids[i];
+    Kokkos::deep_copy(deviceGrids, h_deviceGrids);
+
+    // Create test vectors
+    const int total_size = (m1 + 1) * (m2 + 1);
+    Kokkos::View<double**> x("x", nInstances, total_size);
+    Kokkos::View<double**> b("b", nInstances, total_size);
+    Kokkos::View<double**> result("result", nInstances, total_size);
+
+    // Initialize test data
+    auto h_x = Kokkos::create_mirror_view(x);
+    auto h_b = Kokkos::create_mirror_view(b);
+    for(int inst = 0; inst < nInstances; ++inst) {
+        for(int idx = 0; idx < total_size; ++idx) {
+            h_x(inst, idx) = static_cast<double>(std::rand()) / RAND_MAX;
+            h_b(inst, idx) = static_cast<double>(std::rand()) / RAND_MAX;
+        }
+    }
+    Kokkos::deep_copy(x, h_x);
+    Kokkos::deep_copy(b, h_b);
+
+    // Execute solver operations
+    using team_policy = Kokkos::TeamPolicy<>;
+    using member_type = team_policy::member_type;
+    team_policy policy(nInstances, Kokkos::AUTO);
+
+    const int NUM_RUNS = 5;
+    std::vector<double> timings(NUM_RUNS);
+
+    for(int run = 0; run < NUM_RUNS; run++) {
+        auto t_start = timer::now();
+
+        Kokkos::parallel_for("combined_solvers", policy,
+            KOKKOS_LAMBDA(const member_type& team) {
+                const int instance = team.league_rank();
+
+                auto x_i = Kokkos::subview(x, instance, Kokkos::ALL);
+                auto b_i = Kokkos::subview(b, instance, Kokkos::ALL);
+                auto result_i = Kokkos::subview(result, instance, Kokkos::ALL);
+                GridViews grid_i = deviceGrids(instance);
+
+                // Build matrices (once per timestep)
+                A0_solvers(instance).build_matrix(grid_i, rho, sigma, team);
+                A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+                A2_solvers(instance).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
+
+                for(int n = 0; n < N; n++) {
+                    // Step 1: Y0 = Un + dt*(A0 + A1 + A2)Un
+                    A0_solvers(instance).multiply_parallel_s_and_v(x_i, result_i, team);
+                    A1_solvers(instance).multiply_parallel_v(x_i, result_i, team);
+                    A2_solvers(instance).multiply_parallel_s(x_i, result_i, team);
+
+                    // Step 2: (I - theta*dt*A1)Y1 = Y0
+                    A1_solvers(instance).solve_implicit_parallel_v(x_i, result_i, team);
+
+                    // Step 3: (I - theta*dt*A2)Un+1 = Y1
+                    A2_solvers(instance).solve_implicit_parallel_s(x_i, result_i, team);
+                }
+        });
+        Kokkos::fence();
+
+        auto t_end = timer::now();
+        timings[run] = std::chrono::duration<double>(t_end - t_start).count();
+    }
+
+    double avg_time = std::accumulate(timings.begin(), timings.end(), 0.0) / NUM_RUNS;
+    double variance = 0.0;
+    for(const auto& t : timings) {
+        variance += (t - avg_time) * (t - avg_time);
+    }
+    double std_dev = std::sqrt(variance / NUM_RUNS); // Corrected standard deviation
+
+    return TestResult{category, m1, m2, nInstances, avg_time, std_dev};
+}
+
+void test_combined_kernel_solvers_multiple_cases() {
+    // Define all test cases
+    std::vector<TestCase> test_cases = {
+        // Small Grids
+        {"Small Grids", 50, 25, {50, 100, 200}},
+        {"Small Grids", 75, 35, {50, 100, 200}},
+        // Medium Grids (Production-like)
+        {"Medium Grids", 100, 50, {50, 100, 200}},
+        {"Medium Grids", 150, 75, {50, 100, 200}},
+        // Large Grids (Stress Tests)
+        {"Large Grids", 300, 100, {20, 50, 100}},
+        {"Large Grids", 400, 150, {20, 50, 100}}
+    };
+
+    // Vector to store all test results
+    std::vector<TestResult> all_results;
+
+    // Print header
+    std::cout << "Starting various Tests with Kokkos...\n\n";
+
+    // Iterate over each test case
+    for(const auto& test_case : test_cases) {
+        for(const auto& nInstances : test_case.instances) {
+            // Run the test
+            TestResult result = run_single_test(test_case.category, test_case.m1, test_case.m2, nInstances);
+            all_results.push_back(result);
+
+            // Optionally, print intermediate progress
+            std::cout << "Completed: " << test_case.category
+                      << " (m1=" << test_case.m1
+                      << ", m2=" << test_case.m2
+                      << "), Instances: " << nInstances
+                      << " | Avg Time: " << result.avg_time
+                      << " s, Std Dev: " << result.std_dev << " s\n";
+        }
+    }
+
+    // Print the table header
+    std::cout << "\nTest Results:\n";
+    std::cout << std::left
+              << std::setw(15) << "Category"
+              << std::setw(10) << "m1"
+              << std::setw(10) << "m2"
+              << std::setw(15) << "Instances"
+              << std::setw(15) << "Avg Time (s)"
+              << std::setw(15) << "Std Dev (s)"
+              << "\n";
+
+    std::cout << std::string(80, '-') << "\n";
+
+    // Print each result
+    for(const auto& res : all_results) {
+        std::cout << std::left
+                  << std::setw(15) << res.category
+                  << std::setw(10) << res.m1
+                  << std::setw(10) << res.m2
+                  << std::setw(15) << res.nInstances
+                  << std::setw(15) << std::fixed << std::setprecision(6) << res.avg_time
+                  << std::setw(15) << std::fixed << std::setprecision(6) << res.std_dev
+                  << "\n";
+    }
+
+    std::cout << "\nAll tests have completed successfully.\n";
+}
 
 
 
@@ -107,8 +479,8 @@ void run_device_solver_example() {
 void test_device_class() {
   Kokkos::initialize();
   {
-    // All your tests, calls, etc. happen here
-    //run_device_solver_example();       // or runTest(), etc.
+    test_combined_kernel_solvers();
+    //run_device_solver_example();       
   }
   Kokkos::finalize();
  
