@@ -5,42 +5,6 @@
 #include <numeric>
 
 
-// Vector shuffling implementations
-KOKKOS_FUNCTION
-void device_shuffle_vector(
-    const Kokkos::View<double*>& input,
-    const Kokkos::View<double*>& output,
-    const int m1,
-    const int m2,
-    const Kokkos::TeamPolicy<>::member_type& team) 
-{
-    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m1 + 1), 
-        [&](const int i) {
-            for(int j = 0; j <= m2; j++) {
-                output(i*(m2+1) + j) = input(j*(m1+1) + i);
-            }
-        });
-    team.team_barrier();
-}
-
-KOKKOS_FUNCTION
-void device_unshuffle_vector(
-    const Kokkos::View<double*>& input,
-    const Kokkos::View<double*>& output,
-    const int m1,
-    const int m2,
-    const Kokkos::TeamPolicy<>::member_type& team) 
-{
-    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m1 + 1), 
-        [&](const int i) {
-            for(int j = 0; j <= m2; j++) {
-                output(j*(m1+1) + i) = input(i*(m2+1) + j);
-            }
-        });
-    team.team_barrier();
-}
-
-
 /*
 
 Class test

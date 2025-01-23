@@ -795,8 +795,9 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 100;
-    int m2 = 50;
+    int m1 = 25;
+    int m2 = 25;
+
     int m = (m1 + 1) * (m2 + 1);
     int N = 20;
     double theta = 0.8;
@@ -1243,6 +1244,7 @@ void test_CS_schuffled_implied_vol(){
     double S_0 = K;
     double V_0 = 0.04;
     double T = 1.0;
+
     double r_d = 0.025;
     double r_f = 0.0;
     double rho = -0.9;
@@ -1539,7 +1541,7 @@ void test_DO_scheme() {
         //test_DO_m1_convergence();
         //test_all_convergence();
 
-        //test_heston_call_shuffled();
+        test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
         //test_shuffled_convergence();
 
@@ -1549,7 +1551,7 @@ void test_DO_scheme() {
         //test_CS_scheme_call();
         //test_CS_convergence();
         //test_CS_shuffled();
-        test_CS_schuffled_implied_vol();
+        //test_CS_schuffled_implied_vol();
 
         } // All test objects destroyed here
     Kokkos::finalize();
