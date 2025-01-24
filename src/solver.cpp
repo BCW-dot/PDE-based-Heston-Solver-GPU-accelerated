@@ -785,7 +785,7 @@ Shuffled DO scheme tests
 void test_heston_call_shuffled() {
     // Test parameters
     double K = 100.0;
-    double S_0 = K;
+    double S_0 = 90;
     double V_0 = 0.04;
     double T = 1.0;
     double r_d = 0.025;
@@ -795,7 +795,7 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 25;
+    int m1 = 50;
     int m2 = 25;
 
     int m = (m1 + 1) * (m2 + 1);
@@ -803,7 +803,8 @@ void test_heston_call_shuffled() {
     double theta = 0.8;
 
     // Create grid
-    Grid grid = create_test_grid(m1, m2);
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
 
     // Initialize matrices
     heston_A0Storage_gpu A0(m1, m2);

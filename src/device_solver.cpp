@@ -487,15 +487,16 @@ void test_combined_kernel_solvers_multiple_cases() {
 The following implements the the DO scheme in a parallel fashion
 
 */
-void test_parallel_DO_scheme() {
+void test_DEVICE_parallel_DO_scheme() {
     using timer = std::chrono::high_resolution_clock;
     using Device = Kokkos::DefaultExecutionSpace;
 
     // Test parameters
-    const double K = 100.0;
-    const double S_0 = K;
+    //const double K = 90.0;
+    const double S_0 = 90.0;
     const double V_0 = 0.04;
     const double T = 1.0;
+
 
     const double r_d = 0.025;
     const double r_f = 0.0;
@@ -505,10 +506,17 @@ void test_parallel_DO_scheme() {
     const double eta = 0.04;
     
     // Parameters
-    const int m1 = 25;
+    const int m1 = 50;
     const int m2 = 25;
 
-    const int nInstances = 5;
+    const int nInstances = 20;
+
+    //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
+    //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
+    std::vector<double> strikes(nInstances,0.0);
+    for(int i = 0; i < nInstances; ++i) {
+        strikes[i] = 90 + i;
+    }
     
     // Solver parameters
     const int N = 20;
@@ -516,9 +524,8 @@ void test_parallel_DO_scheme() {
     const double delta_t = T/N;
 
 
-
     std::cout << "Number of Instances: " << nInstances << std::endl;
-    std::cout << "Dimensions: m1 = " << m1 << ", m2 = " << m2 << ", time steps = " << N << std::endl;
+    std::cout << "Stock S0 = " << S_0 << "Dimensions: m1 = " << m1 << ", m2 = " << m2 << ", time steps = " << N << std::endl;
 
 
     // Create solver arrays
@@ -553,13 +560,14 @@ void test_parallel_DO_scheme() {
     std::vector<GridViews> hostGrids;
     buildMultipleGridViews(hostGrids, nInstances, m1, m2);
     for(int i = 0; i < nInstances; ++i) {
+        double K = strikes[i];
         auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
         auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[i].device_Vec_v);
         auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
         auto h_Delta_v = Kokkos::create_mirror_view(hostGrids[i].device_Delta_v);
 
-        Grid tempGrid = create_test_grid(m1, m2);
-        //Grid tempGrid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+        //Grid tempGrid = create_test_grid(m1, m2);
+        Grid tempGrid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
         
         for(int j = 0; j <= m1; j++) h_Vec_s(j) = tempGrid.Vec_s[j];
         for(int j = 0; j <= m2; j++) h_Vec_v(j) = tempGrid.Vec_v[j];
@@ -605,6 +613,7 @@ void test_parallel_DO_scheme() {
         auto grid = hostGrids[inst];
         auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
         Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
+        double K = strikes[inst];
         
         for(int j = 0; j <= m2; j++) {
             for(int i = 0; i <= m1; i++) {
@@ -708,7 +717,7 @@ void test_parallel_DO_scheme() {
     auto h_U = Kokkos::create_mirror_view(U);
     Kokkos::deep_copy(h_U, U);
 
-    for(int inst = 0; inst < nInstances; ++inst) {
+    for(int inst = 0; inst < min(5,nInstances); ++inst) {
         // Create host mirrors for the grid views
         auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_s);
         auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_v);
@@ -737,8 +746,9 @@ void test_parallel_DO_scheme() {
         double rel_error = std::abs(price - reference_price)/reference_price;
         
         std::cout << "Instance " << inst 
-                << ": Price = " << std::setprecision(16) << price 
-                << ", Relative Error = " << rel_error << "\n";
+                  << " Strike " << strikes[inst] 
+                << ": Price = " << std::setprecision(16) << price << "\n";
+                //<< ", Relative Error = " << rel_error << "\n";
     }
 }
 
@@ -751,7 +761,7 @@ void test_device_class() {
     //test_combined_kernel_solvers();
     //test_combined_kernel_solvers_multiple_cases();
     //run_device_solver_example(); 
-    test_parallel_DO_scheme();      
+    test_DEVICE_parallel_DO_scheme();      
   }
   Kokkos::finalize();
  
