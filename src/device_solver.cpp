@@ -111,7 +111,7 @@ void run_device_solver_example() {
 
 /*
 
-The following implements the the DO scheme in a parallel fashion
+The following implements the the DO scheme in a parallel fashion. It is hardocded inside this test.
 
 */
 void test_DEVICE_parallel_DO_scheme() {
@@ -562,240 +562,219 @@ void test_parallel_DO_method() {
 
 /*
 
-This is a test for how we can compute the jacobian in parallel
+This is a test for how we could compute the jacobian in parallel.
 
 */
-void test_parallel_DO_solve_params()
-{
+void test_deviceCallable_Do_solver() {
     using timer = std::chrono::high_resolution_clock;
     using Device = Kokkos::DefaultExecutionSpace;
 
-    // ----------------------------
-    // 1) Basic PDE / Heston setup
-    // ----------------------------
     const double S_0 = 100.0;
     const double V_0 = 0.04;
-    const double T   = 1.0;
-    const int    N   = 20;
-    const double theta   = 0.8;
-    const double delta_t = T / N;
+    const double T = 1.0;
 
-    // Grid dimensions
+
+    const double r_d = 0.025;
+    const double r_f = 0.0;
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double kappa = 1.5;
+    const double eta = 0.04;
+    
+    // Parameters
     const int m1 = 50;
     const int m2 = 25;
 
-    // We will test multiple strikes *and* multiple parameter sets
-    const int nStrikes = 5;           // e.g. 5 different options
-    std::vector<double> strikes(nStrikes);
-    for(int i = 0; i < nStrikes; ++i) {
-        strikes[i] = 90 + i;  // e.g. 90, 91, 92, 93, 94
+    const int nInstances = 20;
+
+    //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
+    //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
+    std::vector<double> strikes(nInstances,0.0);
+    for(int i = 0; i < nInstances; ++i) {
+        strikes[i] = 90 + i;
     }
+    
+    // Solver parameters
+    const int N = 20;
+    const double theta = 0.8;
+    const double delta_t = T/N;
 
-    // Suppose we have 2 different sets of Heston parameters to test
-    std::vector<HestonParams> hostParamVec;
-    // Param set #0 (like your defaults)
-    hostParamVec.push_back(HestonParams(0.025, 0.0, -0.9, 0.3, 1.5, 0.04));
-    // Param set #1 (some variation)
-    hostParamVec.push_back(HestonParams(0.01,  0.0, -0.7, 0.4, 2.0, 0.05));
+    std::cout << "Number of Instances: " << nInstances << std::endl;
+    std::cout << "Stock S0 = " << S_0 << ", Dimensions: m1 = " << m1 << ", m2 = " << m2 << ", time steps = " << N << std::endl;
 
-    const int nParamSets = static_cast<int>(hostParamVec.size());  // = 2
-    const int nInstances = nStrikes * nParamSets;  // e.g. 5 * 2 = 10 PDE solves
 
-    std::cout << "Number of Instances: " << nInstances << " ("
-              << nStrikes << " strikes x " << nParamSets << " parameter sets)\n";
-    std::cout << "Stock S0 = " << S_0 << ", Dimensions: m1 = " 
-              << m1 << ", m2 = " << m2 << ", time steps = " << N << std::endl;
-
-    // ----------------------------
-    // 2) Allocate PDE solver arrays for nInstances
-    // ----------------------------
+    // Create solver arrays
     Kokkos::View<Device_A0_heston<Device>*> A0_solvers("A0_solvers", nInstances);
     Kokkos::View<Device_A1_heston<Device>*> A1_solvers("A1_solvers", nInstances);
     Kokkos::View<Device_A2_shuffled_heston<Device>*> A2_solvers("A2_solvers", nInstances);
-
+    
+    // Initialize solvers
     auto h_A0 = Kokkos::create_mirror_view(A0_solvers);
     auto h_A1 = Kokkos::create_mirror_view(A1_solvers);
     auto h_A2 = Kokkos::create_mirror_view(A2_solvers);
-
-    // Initialize them on host
+    
     for(int i = 0; i < nInstances; i++) {
         h_A0(i) = Device_A0_heston<Device>(m1, m2);
         h_A1(i) = Device_A1_heston<Device>(m1, m2);
         h_A2(i) = Device_A2_shuffled_heston<Device>(m1, m2);
     }
-    // Copy to device
     Kokkos::deep_copy(A0_solvers, h_A0);
     Kokkos::deep_copy(A1_solvers, h_A1);
     Kokkos::deep_copy(A2_solvers, h_A2);
 
-    // ----------------------------
-    // 3) Allocate boundary conditions array (size = nInstances)
-    //    Each instance will have the relevant r_d, r_f from its parameter set
-    // ----------------------------
+    // Create boundary conditions array
     Kokkos::View<Device_BoundaryConditions<Device>*> bounds_d("bounds_d", nInstances);
     auto h_bounds = Kokkos::create_mirror_view(bounds_d);
+    for(int i = 0; i < nInstances; ++i) {
+        h_bounds(i) = Device_BoundaryConditions<Device>(m1, m2, r_d, r_f, N, delta_t);
+    }
+    Kokkos::deep_copy(bounds_d, h_bounds);
 
-    // ----------------------------
-    // 4) Create a Kokkos::View of HestonParams for all nInstances
-    //    So each PDE instance has its own param set
-    // ----------------------------
-    Kokkos::View<HestonParams*, Device> paramsView("paramsView", nInstances);
-    auto h_paramsView = Kokkos::create_mirror_view(paramsView);
 
-    // ----------------------------
-    // 5) Build the device grids for each instance
-    //    BUT the grid depends only on strike => we will build one grid per strike,
-    //    then assign the same grid to all param sets of that strike.
-    // ----------------------------
-    std::vector<GridViews> hostGrids(nInstances);
+    // Initialize grid views
+    std::vector<GridViews> hostGrids;
+    buildMultipleGridViews(hostGrids, nInstances, m1, m2);
+    for(int i = 0; i < nInstances; ++i) {
+        double K = strikes[i];
+        auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
+        auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[i].device_Vec_v);
+        auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
+        auto h_Delta_v = Kokkos::create_mirror_view(hostGrids[i].device_Delta_v);
+
+        //Grid tempGrid = create_test_grid(m1, m2);
+        Grid tempGrid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+        
+        for(int j = 0; j <= m1; j++) h_Vec_s(j) = tempGrid.Vec_s[j];
+        for(int j = 0; j <= m2; j++) h_Vec_v(j) = tempGrid.Vec_v[j];
+        for(int j = 0; j < m1; j++) h_Delta_s(j) = tempGrid.Delta_s[j];
+        for(int j = 0; j < m2; j++) h_Delta_v(j) = tempGrid.Delta_v[j];
+
+        Kokkos::deep_copy(hostGrids[i].device_Vec_s, h_Vec_s);
+        Kokkos::deep_copy(hostGrids[i].device_Vec_v, h_Vec_v);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_s, h_Delta_s);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_v, h_Delta_v);
+    }
+
     Kokkos::View<GridViews*> deviceGrids("deviceGrids", nInstances);
     auto h_deviceGrids = Kokkos::create_mirror_view(deviceGrids);
-
-    // We'll use your helper: buildMultipleGridViews() for the *unique* strikes.
-    // That returns 'nStrikes' grids. But we have nInstances because each strike
-    // is replicated for each param set. So let's do it in two steps:
-    std::vector<GridViews> uniqueStrikeGrids;
-    buildMultipleGridViews(uniqueStrikeGrids, nStrikes, m1, m2);
-
-    // Now fill out the PDE data instance by instance
-    int counter = 0;
-    for(int iStrike = 0; iStrike < nStrikes; ++iStrike) {
-        double K = strikes[iStrike];
-
-        // For each param set, create PDE instance with that param set + that strike
-        for(int p = 0; p < nParamSets; ++p) {
-            // 1) Fill the param set
-            h_paramsView(counter) = hostParamVec[p];
-
-            // 2) Fill boundary conditions object
-            const double r_d   = hostParamVec[p].r_d;
-            const double r_f   = hostParamVec[p].r_f;
-            h_bounds(counter) = 
-               Device_BoundaryConditions<Device>(m1, m2, r_d, r_f, N, delta_t);
-
-            // 3) Assign the same grid used for strike iStrike
-            //    We just copy that struct into hostGrids[counter]
-            hostGrids[counter] = uniqueStrikeGrids[iStrike];
-
-            // 4) Store that into deviceGrids mirror
-            h_deviceGrids(counter) = hostGrids[counter];
-
-            counter++;
-        }
-    }
-
-    // Now we deep-copy the boundary conditions and param sets
-    Kokkos::deep_copy(bounds_d, h_bounds);
-    Kokkos::deep_copy(paramsView, h_paramsView);
+    for(int i = 0; i < nInstances; ++i) h_deviceGrids(i) = hostGrids[i];
     Kokkos::deep_copy(deviceGrids, h_deviceGrids);
-
-    // ----------------------------
-    // 6) Create a workspace for all PDE instances
-    // ----------------------------
+    
     const int total_size = (m1+1)*(m2+1);
+    
+    // Create workspace instead of individual arrays
     DO_Workspace<Device> workspace(nInstances, total_size);
 
-    // ----------------------------
-    // 7) Initialize the initial condition (payoff) for each PDE instance
-    //    payoff = max(S - K, 0).
-    //    But each PDE instance has a "strike" we can read from the host vector.
-    //    We'll do it exactly as you do in your code.
-    // ----------------------------
-    {
-        auto h_U_0 = Kokkos::create_mirror_view(workspace.U);
+    // Initialize initial conditions U_0
+    Kokkos::View<double**> U_0("U_0", nInstances, total_size);
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
 
-        // We'll loop over instances. Each instance belongs to a certain iStrike, paramSet.
-        // But let's figure out the strike from iStrike = instance // nParamSets 
-        counter = 0;
-        for(int iStrike = 0; iStrike < nStrikes; ++iStrike) {
-            double K = strikes[iStrike];
-
-            for(int p = 0; p < nParamSets; ++p) {
-                // fetch the grid
-                auto grid = hostGrids[counter];
-                // mirror to access S-values
-                auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
-                Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
-
-                for(int j = 0; j <= m2; j++) {
-                    for(int i = 0; i <= m1; i++) {
-                        int idx = i + j*(m1+1);
-                        h_U_0(counter, idx) = std::max(h_Vec_s(i) - K, 0.0);
-                    }
-                }
-                counter++;
+    // Fill initial conditions on host
+    for(int inst = 0; inst < nInstances; ++inst) {
+        auto grid = hostGrids[inst];
+        auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
+        Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
+        double K = strikes[inst];
+        
+        for(int j = 0; j <= m2; j++) {
+            for(int i = 0; i <= m1; i++) {
+                h_U_0(inst, i + j*(m1+1)) = std::max(h_Vec_s(i) - K, 0.0);
             }
         }
-        // Copy initial condition to device
-        Kokkos::deep_copy(workspace.U, h_U_0);
     }
+    Kokkos::deep_copy(U_0, h_U_0);
+    Kokkos::deep_copy(workspace.U, U_0);  // Copy initial condition to workspace
 
-    // ----------------------------
-    // 8) Run the PDE solver in parallel for all param sets & strikes
-    // ----------------------------
+    using team_policy = Kokkos::TeamPolicy<>;
+    team_policy policy(nInstances, Kokkos::AUTO);
+
     auto t_start = timer::now();
 
-    parallel_DO_solve_params(
-        // PDE sizes
-        nInstances, m1, m2, N, T, delta_t, theta,
-        // array of parameters
-        paramsView,
-        // PDE data
-        A0_solvers, A1_solvers, A2_solvers,
-        bounds_d, deviceGrids,
-        // workspace
-        workspace);
+    // Main kernel launch with modified internals
+    Kokkos::parallel_for("DO_scheme", policy,
+        KOKKOS_LAMBDA(const team_policy::member_type& team) {
+            const int instance = team.league_rank();
+            
+            // Get subviews from workspace
+            auto U_i = Kokkos::subview(workspace.U, instance, Kokkos::ALL);
+            auto Y_0_i = Kokkos::subview(workspace.Y_0, instance, Kokkos::ALL);
+            auto Y_1_i = Kokkos::subview(workspace.Y_1, instance, Kokkos::ALL);
+            auto A0_result_i = Kokkos::subview(workspace.A0_result, instance, Kokkos::ALL);
+            auto A1_result_i = Kokkos::subview(workspace.A1_result, instance, Kokkos::ALL);
+            auto A2_result_unshuf_i = Kokkos::subview(workspace.A2_result_unshuf, instance, Kokkos::ALL);
+            
+            auto U_shuffled_i = Kokkos::subview(workspace.U_shuffled, instance, Kokkos::ALL);
+            auto Y_1_shuffled_i = Kokkos::subview(workspace.Y_1_shuffled, instance, Kokkos::ALL);
+            auto A2_result_shuffled_i = Kokkos::subview(workspace.A2_result_shuffled, instance, Kokkos::ALL);
+            auto U_next_shuffled_i = Kokkos::subview(workspace.U_next_shuffled, instance, Kokkos::ALL);
+
+            //Initialize Grid views
+            GridViews grid_i = deviceGrids(instance);
+            
+            // Initialize boundaries 
+            bounds_d(instance).initialize(grid_i, team);
+            auto bounds = bounds_d(instance);
+            
+            // Build matrices
+            A0_solvers(instance).build_matrix(grid_i, rho, sigma, team);
+            A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+            A2_solvers(instance).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
+
+            // Call device timestepping
+            device_DO_timestepping<Device, decltype(U_i)>(
+                m1, m2, N, delta_t, theta, r_f,
+                A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
+                bounds,
+                U_i, Y_0_i, Y_1_i,
+                A0_result_i, A1_result_i, A2_result_unshuf_i,
+                U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
+                team
+            );
+    });
+    Kokkos::fence();
 
     auto t_end = timer::now();
-    double elapsed = std::chrono::duration<double>(t_end - t_start).count();
-    std::cout << "parallel_DO_solve_params completed in " 
-              << elapsed << " seconds.\n";
+    std::cout << "Parallel DO time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
 
-    // ----------------------------
-    // 9) Retrieve final results and print a few
-    // ----------------------------
+    // Results processing uses workspace.U instead of U
     auto h_U = Kokkos::create_mirror_view(workspace.U);
     Kokkos::deep_copy(h_U, workspace.U);
 
-    // We'll show results for the first min(5,nInstances) PDE instances
-    int toPrint = std::min(5, nInstances);
-    for(int inst = 0; inst < toPrint; ++inst) {
-        // figure out which strike + paramSet
-        int iStrike  = inst / nParamSets;  // integer division
-        int p        = inst % nParamSets;
-        double K     = strikes[iStrike];
+    for(int inst = 0; inst < min(5,nInstances); ++inst) {
+        // Create host mirrors for the grid views
+        auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_s);
+        auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_v);
+        Kokkos::deep_copy(h_Vec_s, hostGrids[inst].device_Vec_s);
+        Kokkos::deep_copy(h_Vec_v, hostGrids[inst].device_Vec_v);
 
-        // find grid indices for S_0=100, V_0=0.04
-        auto & grid = hostGrids[inst];
-        auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
-        auto h_Vec_v = Kokkos::create_mirror_view(grid.device_Vec_v);
-        Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
-        Kokkos::deep_copy(h_Vec_v, grid.device_Vec_v);
-
-        int idx_s = -1, idx_v = -1;
-        for(int i=0; i<=m1; i++){
-            if(std::fabs(h_Vec_s(i) - S_0) < 1e-10) {
-                idx_s = i;
+        // Find indices (assuming S_0 and V_0 are defined)
+        int index_s = -1;
+        int index_v = -1;
+        
+        for(int i = 0; i <= m1; i++) {
+            if(std::abs(h_Vec_s(i) - S_0) < 1e-10) {
+                index_s = i;
                 break;
             }
         }
-        for(int j=0; j<=m2; j++){
-            if(std::fabs(h_Vec_v(j) - V_0) < 1e-10) {
-                idx_v = j;
+        
+        for(int i = 0; i <= m2; i++) {
+            if(std::abs(h_Vec_v(i) - V_0) < 1e-10) {
+                index_v = i;
                 break;
             }
         }
-        int finalIndex = idx_s + idx_v*(m1+1);
-        double price   = h_U(inst, finalIndex);
 
-        // Print
-        std::cout << "Instance " << inst
-                  << " (Strike=" << K
-                  << ", ParamSet=" << p << ") -> Price = "
-                  << std::setprecision(10) << price << "\n";
+        double price = h_U(inst, index_s + index_v*(m1+1));
+        //double rel_error = std::abs(price - reference_price)/reference_price;
+        
+        std::cout << "Instance " << inst 
+                  << " Strike " << strikes[inst] 
+                << ": Price = " << std::setprecision(16) << price << "\n";
+                //<< ", Relative Error = " << rel_error << "\n";
     }
-
-    std::cout << "test_parallel_DO_solve_params finished.\n\n";
 }
 
 
@@ -805,8 +784,8 @@ void test_device_class() {
     //run_device_solver_example();
 
     //test_DEVICE_parallel_DO_scheme();  
-    //test_parallel_DO_method();
-    test_parallel_DO_solve_params();   
+    //test_parallel_DO_method();  
+    test_deviceCallable_Do_solver();
   }
   Kokkos::finalize();
  
