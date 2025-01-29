@@ -127,6 +127,7 @@ void test_DEVICE_parallel_DO_scheme() {
 
     const double r_d = 0.025;
     const double r_f = 0.0;
+
     const double rho = -0.9;
     const double sigma = 0.3;
     const double kappa = 1.5;
@@ -257,6 +258,8 @@ void test_DEVICE_parallel_DO_scheme() {
 
     auto t_start = timer::now();
 
+   
+
     Kokkos::parallel_for("DO_scheme", policy,
         KOKKOS_LAMBDA(const team_policy::member_type& team) {
             const int instance = team.league_rank();
@@ -279,6 +282,7 @@ void test_DEVICE_parallel_DO_scheme() {
             // Initialize boundaries AFTER the Grids are initilized 
             bounds_d(instance).initialize(grid_i, team);
             auto bounds = bounds_d(instance);
+
             
             // Build matrices
             A0_solvers(instance).build_matrix(grid_i, rho, sigma, team);
@@ -405,7 +409,7 @@ void test_parallel_DO_method() {
     const int m1 = 50;
     const int m2 = 25;
 
-    const int nInstances = 20;
+    const int nInstances = 5;
 
     //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
     //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
@@ -508,19 +512,24 @@ void test_parallel_DO_method() {
     auto t_start = timer::now();
 
     // Call solver with workspace
-    parallel_DO_solve(
+    for(int i = 0; i<5; i++){
+        
+        Kokkos::deep_copy(workspace.U, U_0);
+
+        parallel_DO_solve(
         nInstances, m1, m2, N, T, delta_t, theta,
         r_d, r_f, rho, sigma, kappa, eta,
         A0_solvers, A1_solvers, A2_solvers,
         bounds_d, deviceGrids,
         workspace);
+    }
 
     auto t_end = timer::now();
     std::cout << "Parallel DO time: "
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
 
-    // Results processing uses workspace.U instead of U
+    //Results processing uses workspace.U instead of U
     auto h_U = Kokkos::create_mirror_view(workspace.U);
     Kokkos::deep_copy(h_U, workspace.U);
 
@@ -1443,7 +1452,7 @@ void test_sequential_J() {
 
     std::vector<double> base_params = {kappa, eta, sigma, rho, V_0};
     const std::vector<std::string> param_names = {"kappa", "eta", "sigma", "rho", "V_0"};
-    const double eps = 0.0;//1e-6;  // Perturbation size
+    const double eps = 1e-6;  // Perturbation size
 
     std::cout << "Base parameters:\n";
     for(int i = 0; i < 5; i++) {
@@ -1568,11 +1577,11 @@ void test_sequential_J() {
     // Loop over parameters for perturbation
     std::cout << "\nComputing prices for parameter " << " perturbation\n";
     auto t_start = timer::now();
-    //for(int param_idx = 0; param_idx < 5; param_idx++) {
+    for(int param_idx = 0; param_idx < 5; param_idx++) {
     //for(int param_idx = 4; param_idx >= 0; param_idx--) {
-    std::vector<int> param_sequence = {4, 0, 1, 2, 3};  // sigma, kappa, rho, eta, V_0
-    for(int i = 0; i < 5; i++) {
-        int param_idx = param_sequence[i];
+    //std::vector<int> param_sequence = {4, 0, 1, 2, 3};  // sigma, kappa, rho, eta, V_0
+    //for(int i = 0; i < 5; i++) {
+        //int param_idx = param_sequence[i];
         std::cout << "\n========= Parameter " << param_names[param_idx] << " iteration =========\n";
         
         // Reset ALL parameters to base values
@@ -1664,12 +1673,6 @@ void test_sequential_J() {
 
         // Reset workspace to initial condition
         Kokkos::deep_copy(workspace.U, U_0);
-        // Zero out other workspace arrays
-        Kokkos::deep_copy(workspace.Y_0, 0.0);
-        Kokkos::deep_copy(workspace.Y_1, 0.0);
-        Kokkos::deep_copy(workspace.A0_result, 0.0);
-        Kokkos::deep_copy(workspace.A1_result, 0.0);
-        Kokkos::deep_copy(workspace.A2_result_unshuf, 0.0);
 
         /*
         // After kernel completes, verify matrices were built with correct parameters
@@ -1689,7 +1692,7 @@ void test_sequential_J() {
     
     std::cout << "\nPerturbed prices for each parameter:\n";
     for(int param_idx = 0; param_idx < 5; param_idx++) {
-        std::cout << "\nParameter " << param_idx << " perturbation:\n";
+        std::cout << "\nParameter " <<  param_names[param_idx] << " perturbation:\n";
         for(int inst = 0; inst < nInstances; inst++) {
             std::cout << "Strike " << strikes[inst] << ": " 
                     << std::setprecision(16) << h_perturbed_prices(param_idx, inst) << "\n";

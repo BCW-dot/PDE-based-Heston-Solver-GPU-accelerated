@@ -107,6 +107,35 @@ struct Device_A2_shuffled_heston {
     // Build explicit matrices
     Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m1 + 1),
         [&](const int i) {
+            
+            //need to zero this shit out, since in the Calibration we call the build method iteratively
+            //since the A2 matrix has += inside its buziuld method we need to get rid of the old values before continuing
+            /*
+            for(int j = 0; j < m2 + 1; j++) {
+                main_diags(i, j) = 0.0;
+            }
+            for(int j = 0; j < m2; j++) {
+                lower_diags(i, j) = 0.0;
+                upper_diags(i, j) = 0.0;
+            }
+            for(int j = 0; j < m2 - 1; j++) {
+                lower2_diags(i, j) = 0.0;
+                upper2_diags(i, j) = 0.0;
+            }
+            */
+            for(int j = 0; j < m2 + 1; j++) {
+                main_diags(i, j) = 0.0;
+                if(j < m2) {
+                lower_diags(i, j) = 0.0;
+                upper_diags(i, j) = 0.0;
+                }
+                if(j < m2 - 1) {
+                lower2_diags(i, j) = 0.0;
+                upper2_diags(i, j) = 0.0;
+                }
+            }
+            
+
             for(int j = 0; j < m2 - 1; j++) {
                 const double temp = kappa * (eta - grid.device_Vec_v[j]);
                 const double temp2 = 0.5 * sigma * sigma * grid.device_Vec_v[j];

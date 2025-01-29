@@ -54,7 +54,8 @@ struct Device_A1_heston {
                      const Kokkos::TeamPolicy<>::member_type& team) {
         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2+1),
             [&](const int j) {
-                // First point (i=0) is boundary
+            
+            // First point (i=0) is boundary
             main_diags(j,0) = 0.0;
             impl_main_diags(j,0) = 1.0;
             if(j < m2) {
