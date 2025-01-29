@@ -784,6 +784,7 @@ void test_deviceCallable_Do_solver() {
 First for loop test for jacobian
 
 */
+//wrong
 void test_jacobian_computation() {
     using timer = std::chrono::high_resolution_clock;
     using Device = Kokkos::DefaultExecutionSpace;
@@ -810,10 +811,10 @@ void test_jacobian_computation() {
     const double theta = 0.8;
     const double delta_t = T/N;
 
-    const double eps = 0.01;  // Perturbation size, should be Order of the error we are making in the Option computation
+    const double eps = 0.0;  // Perturbation size, should be Order of the error we are making in the Option computation
 
     // Setup strikes and market data
-    const int num_strikes = 10;
+    const int num_strikes = 5;
     std::vector<double> strikes(num_strikes);
     for(int i = 0; i < num_strikes; ++i) {
         strikes[i] = 90.0 + i;  // Strikes 
@@ -1041,7 +1042,7 @@ void test_jacobian_computation() {
         std::cout << "\n";
     }
     */
-    /*
+    
    //Printing prices
     auto h_base_prices = Kokkos::create_mirror_view(base_prices);
     auto h_pert_prices = Kokkos::create_mirror_view(pert_prices);
@@ -1076,11 +1077,16 @@ void test_jacobian_computation() {
         }
         std::cout << "\n";
     }
-    */
+    
 }
 
 
+/*
 
+Parallising the entire matrix
+
+*/
+//wrong
 void compute_heston_jacobian(
     // Market parameters
     const double S_0,              // Initial stock price
@@ -1231,7 +1237,7 @@ void compute_heston_jacobian(
     Kokkos::parallel_for("Jacobian_computation", policy,
         KOKKOS_LAMBDA(const team_policy::member_type& team) {
             const int instance = team.league_rank();
-            const int strike_idx = instance / (num_params + 1);
+            const int strike_idx = instance / (num_params + 1); //maybe get rid of the 1 here
             const int param_idx = instance % (num_params + 1);
             
             // Get current parameters for this solver
@@ -1326,7 +1332,7 @@ void compute_heston_jacobian(
         int base_idx = i * (num_params + 1);
         double base_price = h_U(base_idx, index_s + index_v*(m1+1));
         
-        //std::cout << "\nStrike " << strikes[i] << " base price: " << base_price << "\n";
+        std::cout << "\nStrike " << strikes[i] << " base price: " << base_price << "\n";
         
         for(int j = 0; j < num_params; ++j) {
             int perturb_idx = base_idx + j + 1;
@@ -1334,9 +1340,9 @@ void compute_heston_jacobian(
             
             h_jacobian(i,j) = (perturbed_price - base_price) / eps;
             
-            //std::cout << "Param " << j << ": perturbed price = " << perturbed_price 
-                    //<< ", diff = " << perturbed_price - base_price 
-                    //<< ", derivative = " << h_jacobian(i,j) << "\n";
+            std::cout << "Param " << j << ": perturbed price = " << perturbed_price 
+                    << ", diff = " << perturbed_price - base_price 
+                    << ", derivative = " << h_jacobian(i,j) << "\n";
         }
     }
 
@@ -1363,7 +1369,7 @@ void test_heston_jacobian() {
     };
 
     // Create array of strikes around S_0
-    const int num_strikes = 60;
+    const int num_strikes = 5;
     std::vector<double> strikes(num_strikes);
     for(int i = 0; i < num_strikes; ++i) {
         strikes[i] = 90.0 + i;  // Strikes 
@@ -1373,7 +1379,7 @@ void test_heston_jacobian() {
     const int m1 = 50;          // Stock grid points
     const int m2 = 25;          // Variance grid points
     const int N = 20;           // Time steps
-    const double eps = 0.000001;    // Parameter perturbation size
+    const double eps = 0.0;    // Parameter perturbation size
 
     // Create Jacobian matrix
     Kokkos::View<double**> jacobian("jacobian", num_strikes, 5);
@@ -1414,6 +1420,284 @@ void test_heston_jacobian() {
 }
 
 
+/*
+
+sequential J
+
+*/
+void test_sequential_J() {
+    using timer = std::chrono::high_resolution_clock;
+    using Device = Kokkos::DefaultExecutionSpace;
+
+    const double S_0 = 100.0;
+    const double V_0 = 0.04;
+    const double T = 1.0;
+
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double kappa = 1.5;
+    const double eta = 0.04;
+
+    const double r_d = 0.025;
+    const double r_f = 0.0;
+
+    std::vector<double> base_params = {kappa, eta, sigma, rho, V_0};
+    const std::vector<std::string> param_names = {"kappa", "eta", "sigma", "rho", "V_0"};
+    const double eps = 0.0;//1e-6;  // Perturbation size
+
+    std::cout << "Base parameters:\n";
+    for(int i = 0; i < 5; i++) {
+        std::cout << param_names[i] << " = " << base_params[i] << "\n";
+    }
+    
+    // Parameters
+    const int m1 = 50;
+    const int m2 = 25;
+
+    const int nInstances = 5;
+
+    //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
+    //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
+    std::vector<double> strikes(nInstances,0.0);
+    for(int i = 0; i < nInstances; ++i) {
+        strikes[i] = 90 + i;
+    }
+    
+    // Solver parameters
+    const int N = 20;
+    const double theta = 0.8;
+    const double delta_t = T/N;
+
+    std::cout << "Number of Instances: " << nInstances << std::endl;
+    std::cout << "Stock S0 = " << S_0 << ", Dimensions: m1 = " << m1 << ", m2 = " << m2 << ", time steps = " << N << std::endl;
+
+
+    // Create solver arrays
+    Kokkos::View<Device_A0_heston<Device>*> A0_solvers("A0_solvers", nInstances);
+    Kokkos::View<Device_A1_heston<Device>*> A1_solvers("A1_solvers", nInstances);
+    Kokkos::View<Device_A2_shuffled_heston<Device>*> A2_solvers("A2_solvers", nInstances);
+    
+    // Initialize solvers
+    auto h_A0 = Kokkos::create_mirror_view(A0_solvers);
+    auto h_A1 = Kokkos::create_mirror_view(A1_solvers);
+    auto h_A2 = Kokkos::create_mirror_view(A2_solvers);
+    
+    for(int i = 0; i < nInstances; i++) {
+        h_A0(i) = Device_A0_heston<Device>(m1, m2);
+        h_A1(i) = Device_A1_heston<Device>(m1, m2);
+        h_A2(i) = Device_A2_shuffled_heston<Device>(m1, m2);
+    }
+    Kokkos::deep_copy(A0_solvers, h_A0);
+    Kokkos::deep_copy(A1_solvers, h_A1);
+    Kokkos::deep_copy(A2_solvers, h_A2);
+
+    // Create boundary conditions array
+    Kokkos::View<Device_BoundaryConditions<Device>*> bounds_d("bounds_d", nInstances);
+    auto h_bounds = Kokkos::create_mirror_view(bounds_d);
+    for(int i = 0; i < nInstances; ++i) {
+        h_bounds(i) = Device_BoundaryConditions<Device>(m1, m2, r_d, r_f, N, delta_t);
+    }
+    Kokkos::deep_copy(bounds_d, h_bounds);
+
+
+    // Initialize grid views
+    std::vector<GridViews> hostGrids;
+    buildMultipleGridViews(hostGrids, nInstances, m1, m2);
+    for(int i = 0; i < nInstances; ++i) {
+        double K = strikes[i];
+        auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
+        auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[i].device_Vec_v);
+        auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
+        auto h_Delta_v = Kokkos::create_mirror_view(hostGrids[i].device_Delta_v);
+
+        //Grid tempGrid = create_test_grid(m1, m2);
+        Grid tempGrid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+        
+        for(int j = 0; j <= m1; j++) h_Vec_s(j) = tempGrid.Vec_s[j];
+        for(int j = 0; j <= m2; j++) h_Vec_v(j) = tempGrid.Vec_v[j];
+        for(int j = 0; j < m1; j++) h_Delta_s(j) = tempGrid.Delta_s[j];
+        for(int j = 0; j < m2; j++) h_Delta_v(j) = tempGrid.Delta_v[j];
+
+        Kokkos::deep_copy(hostGrids[i].device_Vec_s, h_Vec_s);
+        Kokkos::deep_copy(hostGrids[i].device_Vec_v, h_Vec_v);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_s, h_Delta_s);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_v, h_Delta_v);
+    }
+
+    Kokkos::View<GridViews*> deviceGrids("deviceGrids", nInstances);
+    auto h_deviceGrids = Kokkos::create_mirror_view(deviceGrids);
+    for(int i = 0; i < nInstances; ++i) h_deviceGrids(i) = hostGrids[i];
+    Kokkos::deep_copy(deviceGrids, h_deviceGrids);
+    
+    const int total_size = (m1+1)*(m2+1);
+    
+    // Create workspace instead of individual arrays
+    DO_Workspace<Device> workspace(nInstances, total_size);
+
+    // Initialize initial conditions U_0
+    Kokkos::View<double**> U_0("U_0", nInstances, total_size);
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+
+    // Fill initial conditions on host
+    for(int inst = 0; inst < nInstances; ++inst) {
+        auto grid = hostGrids[inst];
+        auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
+        Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
+        double K = strikes[inst];
+        
+        for(int j = 0; j <= m2; j++) {
+            for(int i = 0; i <= m1; i++) {
+                h_U_0(inst, i + j*(m1+1)) = std::max(h_Vec_s(i) - K, 0.0);
+            }
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+    Kokkos::deep_copy(workspace.U, U_0);  // Copy initial condition to workspace
+
+    // Storage for perturbed prices
+    Kokkos::View<double**> perturbed_prices("perturbed_prices", 5, nInstances);
+    auto h_perturbed_prices = Kokkos::create_mirror_view(perturbed_prices);
+
+    // Create device storage for parameters
+    Kokkos::View<double*> d_params("params", 5);
+    auto h_params = Kokkos::create_mirror_view(d_params);
+
+    using team_policy = Kokkos::TeamPolicy<>;
+    team_policy policy(nInstances, Kokkos::AUTO);
+
+    // Loop over parameters for perturbation
+    std::cout << "\nComputing prices for parameter " << " perturbation\n";
+    auto t_start = timer::now();
+    //for(int param_idx = 0; param_idx < 5; param_idx++) {
+    //for(int param_idx = 4; param_idx >= 0; param_idx--) {
+    std::vector<int> param_sequence = {4, 0, 1, 2, 3};  // sigma, kappa, rho, eta, V_0
+    for(int i = 0; i < 5; i++) {
+        int param_idx = param_sequence[i];
+        std::cout << "\n========= Parameter " << param_names[param_idx] << " iteration =========\n";
+        
+        // Reset ALL parameters to base values
+        for(int i = 0; i < 5; i++) {
+            h_params(i) = base_params[i];
+        }
+        
+        // "Perturb" current parameter (though eps = 0)
+        h_params(param_idx) += eps;
+        
+        // Copy to device
+        Kokkos::deep_copy(d_params, h_params);
+    
+
+        // Main kernel launch with perturbed parameter
+        Kokkos::parallel_for("DO_scheme_perturbed", policy,
+            KOKKOS_LAMBDA(const team_policy::member_type& team) {
+                const int instance = team.league_rank();
+                
+                // Get subviews from workspace
+                auto U_i = Kokkos::subview(workspace.U, instance, Kokkos::ALL);
+                auto Y_0_i = Kokkos::subview(workspace.Y_0, instance, Kokkos::ALL);
+                auto Y_1_i = Kokkos::subview(workspace.Y_1, instance, Kokkos::ALL);
+                auto A0_result_i = Kokkos::subview(workspace.A0_result, instance, Kokkos::ALL);
+                auto A1_result_i = Kokkos::subview(workspace.A1_result, instance, Kokkos::ALL);
+                auto A2_result_unshuf_i = Kokkos::subview(workspace.A2_result_unshuf, instance, Kokkos::ALL);
+                
+                auto U_shuffled_i = Kokkos::subview(workspace.U_shuffled, instance, Kokkos::ALL);
+                auto Y_1_shuffled_i = Kokkos::subview(workspace.Y_1_shuffled, instance, Kokkos::ALL);
+                auto A2_result_shuffled_i = Kokkos::subview(workspace.A2_result_shuffled, instance, Kokkos::ALL);
+                auto U_next_shuffled_i = Kokkos::subview(workspace.U_next_shuffled, instance, Kokkos::ALL);
+
+                GridViews grid_i = deviceGrids(instance);
+                
+                // Initialize boundaries 
+                bounds_d(instance).initialize(grid_i, team);
+                auto bounds = bounds_d(instance);
+                
+                // Build matrices with perturbed parameters
+                A0_solvers(instance).build_matrix(grid_i, d_params(3), d_params(2), team);
+                A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+                A2_solvers(instance).build_matrix(grid_i, r_d, d_params(0), d_params(1), 
+                                            d_params(2), theta, delta_t, team);
+
+                // Call device timestepping
+                device_DO_timestepping<Device, decltype(U_i)>(
+                    m1, m2, N, delta_t, theta, r_f,
+                    A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
+                    bounds,
+                    U_i, Y_0_i, Y_1_i,
+                    A0_result_i, A1_result_i, A2_result_unshuf_i,
+                    U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
+                    team
+                );
+        });
+        Kokkos::fence();
+
+        // Get results for this parameter
+        auto h_U = Kokkos::create_mirror_view(workspace.U);
+        Kokkos::deep_copy(h_U, workspace.U);
+
+        // Extract and store prices
+        for(int inst = 0; inst < nInstances; inst++) {
+            auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_s);
+            auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_v);
+            Kokkos::deep_copy(h_Vec_s, hostGrids[inst].device_Vec_s);
+            Kokkos::deep_copy(h_Vec_v, hostGrids[inst].device_Vec_v);
+
+            int index_s = -1;
+            int index_v = -1;
+            
+            for(int i = 0; i <= m1; i++) {
+                if(std::abs(h_Vec_s(i) - S_0) < 1e-10) {
+                    index_s = i;
+                    break;
+                }
+            }
+            
+            for(int i = 0; i <= m2; i++) {
+                if(std::abs(h_Vec_v(i) - V_0) < 1e-10) {
+                    index_v = i;
+                    break;
+                }
+            }
+
+            double price = h_U(inst, index_s + index_v*(m1+1));
+            h_perturbed_prices(param_idx, inst) = price;
+        }
+
+        // Reset workspace to initial condition
+        Kokkos::deep_copy(workspace.U, U_0);
+        // Zero out other workspace arrays
+        Kokkos::deep_copy(workspace.Y_0, 0.0);
+        Kokkos::deep_copy(workspace.Y_1, 0.0);
+        Kokkos::deep_copy(workspace.A0_result, 0.0);
+        Kokkos::deep_copy(workspace.A1_result, 0.0);
+        Kokkos::deep_copy(workspace.A2_result_unshuf, 0.0);
+
+        /*
+        // After kernel completes, verify matrices were built with correct parameters
+        std::cout << "Matrix building verification:\n";
+        std::cout << "A0 built with rho = " << h_params(3) << ", sigma = " << h_params(2) << "\n";
+        std::cout << "A2 built with kappa = " << h_params(0) << ", eta = " << h_params(1) 
+                  << ", sigma = " << h_params(2) << "\n";
+        */
+    }
+    auto t_end = timer::now();
+    std::cout << "This is a tentative time, there is device host copying done in between" << std::endl;
+    std::cout << "Parameter " << " solve time: "
+             << std::chrono::duration<double>(t_end - t_start).count()
+            << " seconds\n";
+
+    // Print final results
+    
+    std::cout << "\nPerturbed prices for each parameter:\n";
+    for(int param_idx = 0; param_idx < 5; param_idx++) {
+        std::cout << "\nParameter " << param_idx << " perturbation:\n";
+        for(int inst = 0; inst < nInstances; inst++) {
+            std::cout << "Strike " << strikes[inst] << ": " 
+                    << std::setprecision(16) << h_perturbed_prices(param_idx, inst) << "\n";
+        }
+    }
+    
+}
+
 
 
 
@@ -1428,8 +1712,8 @@ void test_device_class() {
     //test_deviceCallable_Do_solver();
 
     //test_jacobian_computation();
-    test_heston_jacobian();
-    
+    //test_heston_jacobian();
+    test_sequential_J();
   }
   Kokkos::finalize();
  
@@ -1442,254 +1726,3 @@ void test_device_class() {
 
 
 
-
-//this is an abomenation of code. I thought classes are not the option since they are tough, 
-//but looking at this i think they are the only option
-/*
-void solve_parallel_heston_do(const std::vector<HestonSolverParams>& params,std::vector<double>& results) {
-
-    using timer = std::chrono::high_resolution_clock;
-
-    // Get dimensions from first instance (all same)
-    const int nInstances = params.size();
-    const int m1 = params[0].m1;
-    const int m2 = params[0].m2;
-    const int total_size = (m1 + 1) * (m2 + 1);
-
-    std::cout << "Solving " << nInstances << " PDEs in parallel\n";
-    std::cout << "Dimensions: m1=" << m1 << ", m2=" << m2 << "\n";
-
-    // Initialize grid views
-    std::vector<GridViews> hostGrids;
-    buildMultipleGridViews(hostGrids, nInstances, m1, m2);
-
-    // Fill grid values for each instance
-    for(int i = 0; i < nInstances; ++i) {
-        // Create host mirrors
-        auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
-        auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[i].device_Vec_v);
-        auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
-        auto h_Delta_v = Kokkos::create_mirror_view(hostGrids[i].device_Delta_v);
-        
-        // Create temporary Grid object
-        Grid tempGrid = create_test_grid(m1, m2);
-        
-        // Copy values to host mirrors
-        for(int j = 0; j <= m1; j++) {
-            h_Vec_s(j) = tempGrid.Vec_s[j];
-        }
-        for(int j = 0; j <= m2; j++) {
-            h_Vec_v(j) = tempGrid.Vec_v[j];
-        }
-        for(int j = 0; j < m1; j++) {
-            h_Delta_s(j) = tempGrid.Delta_s[j];
-        }
-        for(int j = 0; j < m2; j++) {
-            h_Delta_v(j) = tempGrid.Delta_v[j];
-        }
-        
-        // Copy to device
-        Kokkos::deep_copy(hostGrids[i].device_Vec_s, h_Vec_s);
-        Kokkos::deep_copy(hostGrids[i].device_Vec_v, h_Vec_v);
-        Kokkos::deep_copy(hostGrids[i].device_Delta_s, h_Delta_s);
-        Kokkos::deep_copy(hostGrids[i].device_Delta_v, h_Delta_v);
-    }
-
-    // Create device view of GridViews
-    Kokkos::View<GridViews*> deviceGrids("deviceGrids", nInstances);
-    auto h_deviceGrids = Kokkos::create_mirror_view(deviceGrids);
-    for(int i = 0; i < nInstances; ++i) {
-        h_deviceGrids(i) = hostGrids[i];
-    }
-    Kokkos::deep_copy(deviceGrids, h_deviceGrids);
-
-    // Create matrix storage for all instances
-    // A0 matrices
-    Kokkos::View<double***> A0_values("A0_values", nInstances, m2-1, (m1-1)*9);
-
-    // A1 matrices
-    Kokkos::View<double***> A1_main("A1_main", nInstances, m2+1, m1+1);
-    Kokkos::View<double***> A1_lower("A1_lower", nInstances, m2+1, m1);
-    Kokkos::View<double***> A1_upper("A1_upper", nInstances, m2+1, m1);
-    
-    Kokkos::View<double***> A1_impl_main("A1_impl_main", nInstances, m2+1, m1+1);
-    Kokkos::View<double***> A1_impl_lower("A1_impl_lower", nInstances, m2+1, m1);
-    Kokkos::View<double***> A1_impl_upper("A1_impl_upper", nInstances, m2+1, m1);
-
-    Kokkos::View<double***> temp("temp",nInstances, (m2+1), (m1+1)); 
-
-    //A2 matrices
-    Kokkos::View<double***> main_diag("main_diag", nInstances, m1+1, m2+1);
-    Kokkos::View<double***> lower_diag("lower_diag", nInstances, m1+1, m2);
-    Kokkos::View<double***> lower2_diag("lower2_diag", nInstances, m1+1, m2-1);
-    Kokkos::View<double***> upper_diag("upper_diag", nInstances, m1+1, m2);
-    Kokkos::View<double***> upper2_diag("upper2_diag", nInstances, m1+1, m2-1);
-
-    Kokkos::View<double***> impl_main_diag("impl_main_diag", nInstances, m1+1, m2+1);
-    Kokkos::View<double***> impl_lower_diag("impl_lower_diag", nInstances, m1+1, m2);
-    Kokkos::View<double***> impl_lower2_diag("impl_lower2_diag", nInstances, m1+1, m2-1);
-    Kokkos::View<double***> impl_upper_diag("impl_upper_diag", nInstances, m1+1, m2);
-    Kokkos::View<double***> impl_upper2_diag("impl_upper2_diag", nInstances, m1+1, m2-1);
-
-    Kokkos::View<double***> c_prime("c_prime", nInstances, m1+1, m2+1);
-    Kokkos::View<double***> c2_prime("c2_prime", nInstances, m1+1, m2+1);
-    Kokkos::View<double***> d_prime("d_prime", nInstances, m1+1, m2+1);
-
-    // Solution and temporary vectors
-    Kokkos::View<double**> U("U", nInstances, total_size);
-    Kokkos::View<double**> Y_0("Y_0", nInstances, total_size);
-    Kokkos::View<double**> Y_1("Y_1", nInstances, total_size);
-
-    Kokkos::View<double**> U_shuffled("U_shuffled", total_size);
-    Kokkos::View<double**> Y_1_shuffled("Y_1_shuffled", total_size);
-    Kokkos::View<double**> A2_result_shuffled("A2_result_shuffled", total_size);
-    Kokkos::View<double**> A2_result_unshuf("A2_result_unshuf", total_size);
-
-    // Initialize U with payoff
-    auto h_U = Kokkos::create_mirror_view(U);
-    for(int inst = 0; inst < nInstances; ++inst) {
-        for(int j = 0; j <= m2; j++) {
-            for(int i = 0; i <= m1; i++) {
-                double s = tempGrid.Vec_s[i];
-                h_U(inst, i + j*(m1+1)) = std::max(s - params[inst].K, 0.0);
-            }
-        }
-    }
-    Kokkos::deep_copy(U, h_U);
-
-    // Set up team policy
-    using team_policy = Kokkos::TeamPolicy<>;
-    using member_type = team_policy::member_type;
-    team_policy policy(nInstances, Kokkos::AUTO);
-
-    // Main solver kernel
-    auto t_start = timer::now();
-
-    Kokkos::parallel_for("DO_scheme_solve", policy,
-        KOKKOS_LAMBDA(const member_type& team) {
-            const int inst = team.league_rank();
-            
-            // Get parameters for this instance
-            const double theta = params[inst].theta;
-            const double delta_t = params[inst].delta_t;
-            const int N = params[inst].N;
-
-            // Get grid for this instance
-            GridViews grid_i = deviceGrids(inst);
-
-
-            // Get subviews for solution vectors
-            auto U_i = Kokkos::subview(U, inst, Kokkos::ALL);
-            auto Y_0_i = Kokkos::subview(Y_0, inst, Kokkos::ALL);
-            auto Y_1_i = Kokkos::subview(Y_1, inst, Kokkos::ALL);
-
-            // Create a shuffled view for A2 operations
-            auto U_i_shuffled = Kokkos::subview(U_shuffled, inst, Kokkos::ALL);
-            auto Y_1_i_shuffled = Kokkos::subview(Y_1_shuffled, inst, Kokkos::ALL);
-            auto A2_i_result_shuffled = Kokkos::subview(A2_result_shuffled, inst, Kokkos::ALL);
-            auto A2_i_result_unshuf = Kokkos::subview(A2_result_unshuf, inst, Kokkos::ALL);
-
-
-            // Get subviews for matrices
-            //A0
-            auto A0_values_i = Kokkos::subview(A0_values, inst, Kokkos::ALL, Kokkos::ALL);
-
-            //A1
-            auto A1_main_i = Kokkos::subview(A1_main, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A1_lower_i = Kokkos::subview(A1_lower, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A1_upper_i = Kokkos::subview(A1_upper, inst, Kokkos::ALL, Kokkos::ALL);
-
-            auto A1_impl_main_i = Kokkos::subview(impl_main_diag, instance, Kokkos::ALL, Kokkos::ALL);
-            auto A1_impl_lower_i = Kokkos::subview(impl_lower_diag, instance, Kokkos::ALL, Kokkos::ALL);
-            auto A1_impl_upper_i = Kokkos::subview(impl_upper_diag, instance, Kokkos::ALL, Kokkos::ALL);
-
-            //A2 shuffled
-            auto A2_main_i = Kokkos::subview(A2_main, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A2_lower_i = Kokkos::subview(A2_lower, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A2_lower2_i = Kokkos::subview(A2_lower2, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A2_upper_i = Kokkos::subview(A2_upper, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A2_upper2_i = Kokkos::subview(A2_upper2, inst, Kokkos::ALL, Kokkos::ALL);
-
-            auto A2_impl_main_i = Kokkos::subview(A2_impl_main, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A2_impl_lower_i = Kokkos::subview(A2_impl_lower, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A2_impl_lower2_i = Kokkos::subview(A2_impl_lower2, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A2_impl_upper_i = Kokkos::subview(A2_impl_upper, inst, Kokkos::ALL, Kokkos::ALL);
-            auto A2_impl_upper2_i = Kokkos::subview(A2_impl_upper2, inst, Kokkos::ALL, Kokkos::ALL);
-
-            // Build A0, A1, A2 matrices
-            build_a0_values(A0_values_i,grid_i,params[inst].rho, params[inst].sigma,team);
-
-            build_a1_diagonals(A1_main_i, A1_lower_i, A1_upper_i,A1_impl_main_i, A1_impl_lower_i, A1_impl_upper_i,grid_i,
-                theta, delta_t, params[inst].r_d, params[inst].r_f,team);
-
-            build_a2_diagonals_shuffled(A2_main_i, A2_lower_i, A2_lower2_i, A2_upper_i, A2_upper2_i,
-                A2_impl_main_i, A2_impl_lower_i, A2_impl_lower2_i, A2_impl_upper_i, A2_impl_upper2_i,
-                grid_i,theta, delta_t, params[inst].r_d, params[inst].kappa, params[inst].eta, params[inst].sigma,team);
-
-            //A1 temp storage
-            auto temp_i = Kokkos::subview(temp, instance, Kokkos::ALL, Kokkos::ALL);
-
-            // Get A2 temp storage
-            auto c_prime_i = Kokkos::subview(A2_c_prime, inst, Kokkos::ALL, Kokkos::ALL);
-            auto c2_prime_i = Kokkos::subview(A2_c2_prime, inst, Kokkos::ALL, Kokkos::ALL);
-            auto d_prime_i = Kokkos::subview(A2_d_prime, inst, Kokkos::ALL, Kokkos::ALL);
-
-            // Time stepping loop
-            for(int n = 1; n <= N; n++) {
-                // Step 1: Y_0 = U + dt*(A0 + A1 + A2)U
-                // A0 multiply
-                a0_device_multiply_parallel_s_and_v(A0_values_i,U_i, Y_0_i,team);
-                
-                // A1 multiply
-                a1_device_multiply_parallel_v(A1_main_i, A1_lower_i, A1_upper_i,U_i, Y_0_i,team);
-                
-                // A2 multiply (with shuffling)
-                device_shuffle_vector(U_i, U_shuffled, m1, m2, team);
-                a2_device_multiply_shuffled(A2_main_i, A2_lower_i, A2_lower2_i, A2_upper_i, A2_upper2_i,
-                    U_shuffled, A2_result_shuffled,team);
-                device_unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2, team);
-                
-                // Combine results for Y_0
-                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
-                    [&](const int i) {
-                        double exp_factor = std::exp(params[inst].r_f * delta_t * (n-1));
-                        Y_0_i(i) = U_i(i) + delta_t * (Y_0_i(i) + A2_result_unshuf(i) + bounds.get_b(i) * exp_factor);
-                });
-
-                // Step 2: (I - theta*dt*A1)Y1 = Y0
-                a1_device_solve_implicit_parallel_v(A1_impl_main_i, A1_impl_lower_i, A1_impl_upper_i,Y_1_i, temp_i, Y_0_i,team);
-
-                // Step 3: (I - theta*dt*A2)U = Y1 (with shuffling)
-                device_shuffle_vector(Y_1_i, Y_1_shuffled, m1, m2, team);
-                a2_device_solve_implicit_shuffled(A2_impl_main_i, A2_impl_lower_i, A2_impl_lower2_i, 
-                    A2_impl_upper_i, A2_impl_upper2_i,U_shuffled, c_prime_i, c2_prime_i, d_prime_i, Y_1_shuffled,team);
-                device_unshuffle_vector(U_shuffled, U_i, m1, m2, team);
-
-                team.team_barrier();
-            }
-    });
-    Kokkos::fence();
-
-    auto t_end = timer::now();
-    std::cout << "Solve time: "
-              << std::chrono::duration<double>(t_end - t_start).count()
-              << " seconds" << std::endl;
-
-    // Copy results back
-    auto h_result = Kokkos::create_mirror_view(U);
-    Kokkos::deep_copy(h_result, U);
-    
-    // Extract option prices at (S_0, V_0) for each instance
-    for(int inst = 0; i < nInstances; ++i) {
-        // Find indices for S_0, V_0
-        double S_0 = params[inst].S_0;
-        double V_0 = params[inst].V_0;
-        
-        int index_s = binary_search(grid.Vec_s, S_0);
-        int index_v = binary_search(grid.Vec_v, V_0);
-        
-        results[inst] = h_result(inst, index_s + index_v*(m1+1));
-    }
-}
-
-*/
