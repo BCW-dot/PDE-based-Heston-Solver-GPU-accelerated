@@ -793,7 +793,7 @@ void test_deviceCallable_Do_solver() {
 First for loop test for jacobian
 
 */
-//wrong
+//works! Only v0 will need to do a "trick" to get the FD approximation
 void test_jacobian_computation() {
     using timer = std::chrono::high_resolution_clock;
     using Device = Kokkos::DefaultExecutionSpace;
@@ -820,10 +820,10 @@ void test_jacobian_computation() {
     const double theta = 0.8;
     const double delta_t = T/N;
 
-    const double eps = 0.0;  // Perturbation size, should be Order of the error we are making in the Option computation
+    const double eps = 1e-6;  // Perturbation size, should be Order of the error we are making in the Option computation
 
     // Setup strikes and market data
-    const int num_strikes = 5;
+    const int num_strikes = 10;
     std::vector<double> strikes(num_strikes);
     for(int i = 0; i < num_strikes; ++i) {
         strikes[i] = 90.0 + i;  // Strikes 
@@ -987,44 +987,83 @@ void test_jacobian_computation() {
 
             // Loop over parameters for finite differences
             for(int param = 0; param < 5; param++) {
-                double kappa_p = kappa;
-                double eta_p = eta;
-                double sigma_p = sigma;
-                double rho_p = rho;
-                double v0_p = V_0;
+                // Special handling for V0 (param == 4)
+                if(param == 4) {
+                    //this is a cheat for the pertubation at V0. Since we just take the next variance value inside the grid
+                    double pert_price = U_i(index_s + (index_v + 1)*(m1+1));
+                    pert_prices(instance, param) = pert_price;
+                    J(instance, param) = (pert_price - base_price) / eps;
+                    //this extrapolates the Option price at V0+eps
+                    /*
+                    // Find bracketing variance points for V0 + eps
+                    double v0_pert = V_0 + eps;
+                    int lower_idx = -1;
+                    int upper_idx = -1;
+                    
+                    for(int i = 0; i < m2; i++) {
+                        if(grid_i.device_Vec_v(i) <= v0_pert && v0_pert <= grid_i.device_Vec_v(i+1)) {
+                            lower_idx = i;
+                            upper_idx = i + 1;
+                            break;
+                        }
+                    }
 
-                switch(param) {
-                    case 0: kappa_p += eps; break;
-                    case 1: eta_p += eps; break;
-                    case 2: sigma_p += eps; break;
-                    case 3: rho_p += eps; break;
-                    case 4: v0_p += eps; break;
+                    if(lower_idx != -1) {  // Found bracketing points
+                        // Compute interpolation weights
+                        double v_lower = grid_i.device_Vec_v(lower_idx);
+                        double v_upper = grid_i.device_Vec_v(upper_idx);
+                        double weight = (v0_pert - v_lower) / (v_upper - v_lower);
+                        
+                        // Get prices at S_0 for both variance levels
+                        double price_lower = U_i(index_s + lower_idx*(m1+1));
+                        double price_upper = U_i(index_s + upper_idx*(m1+1));
+                        
+                        // Interpolate price at perturbed V0
+                        double pert_price = price_lower + weight * (price_upper - price_lower);
+                        pert_prices(instance, param) = pert_price;
+                        J(instance, param) = (pert_price - base_price) / eps;
+                    }
+                    */
                 }
+                else {
+                    // Handle other parameters as before
+                    double kappa_p = kappa;
+                    double eta_p = eta;
+                    double sigma_p = sigma;
+                    double rho_p = rho;
 
-                // Reset initial condition
-                for(int idx = 0; idx < total_size; idx++) {
-                    U_i(idx) = U_0_i(idx);
+                    switch(param) {
+                        case 0: kappa_p += eps; break;
+                        case 1: eta_p += eps; break;
+                        case 2: sigma_p += eps; break;
+                        case 3: rho_p += eps; break;
+                    }
+
+                    // Reset initial condition
+                    for(int idx = 0; idx < total_size; idx++) {
+                        U_i(idx) = U_0_i(idx);
+                    }
+
+                    // Rebuild matrices with perturbed parameter
+                    A0_solvers(instance).build_matrix(grid_i, rho_p, sigma_p, team);
+                    A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+                    A2_solvers(instance).build_matrix(grid_i, r_d, kappa_p, eta_p, sigma_p, theta, delta_t, team);
+
+                    // Compute perturbed solution
+                    device_DO_timestepping<Device, decltype(U_i)>(
+                        m1, m2, N, delta_t, theta, r_f,
+                        A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
+                        bounds, U_i, Y_0_i, Y_1_i,
+                        A0_result_i, A1_result_i, A2_result_unshuf_i,
+                        U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
+                        team
+                    );
+
+                    // Store results
+                    double pert_price = U_i(index_s + index_v*(m1+1));
+                    pert_prices(instance, param) = pert_price;
+                    J(instance, param) = (pert_price - base_price) / eps;
                 }
-
-                // Rebuild matrices with perturbed parameter
-                A0_solvers(instance).build_matrix(grid_i, rho_p, sigma_p, team);
-                A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
-                A2_solvers(instance).build_matrix(grid_i, r_d, kappa_p, eta_p, sigma_p, theta, delta_t, team);
-
-                device_DO_timestepping<Device, decltype(U_i)>(
-                    m1, m2, N, delta_t, theta, r_f,
-                    A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
-                    bounds,
-                    U_i, Y_0_i, Y_1_i,
-                    A0_result_i, A1_result_i, A2_result_unshuf_i,
-                    U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
-                    team
-                );
-
-                // Compute and store derivative approximation
-                double pert_price = U_i(index_s + index_v*(m1+1));
-                pert_prices(instance, param) = pert_price;
-                J(instance, param) = (pert_price - base_price) / eps;
             }
         });
         Kokkos::fence();
@@ -1053,6 +1092,7 @@ void test_jacobian_computation() {
     */
     
    //Printing prices
+   
     auto h_base_prices = Kokkos::create_mirror_view(base_prices);
     auto h_pert_prices = Kokkos::create_mirror_view(pert_prices);
     Kokkos::deep_copy(h_base_prices, base_prices);
@@ -1086,6 +1126,7 @@ void test_jacobian_computation() {
         }
         std::cout << "\n";
     }
+    
     
 }
 
@@ -1341,7 +1382,7 @@ void compute_heston_jacobian(
         int base_idx = i * (num_params + 1);
         double base_price = h_U(base_idx, index_s + index_v*(m1+1));
         
-        std::cout << "\nStrike " << strikes[i] << " base price: " << base_price << "\n";
+        //std::cout << "\nStrike " << strikes[i] << " base price: " << base_price << "\n";
         
         for(int j = 0; j < num_params; ++j) {
             int perturb_idx = base_idx + j + 1;
@@ -1349,9 +1390,9 @@ void compute_heston_jacobian(
             
             h_jacobian(i,j) = (perturbed_price - base_price) / eps;
             
-            std::cout << "Param " << j << ": perturbed price = " << perturbed_price 
-                    << ", diff = " << perturbed_price - base_price 
-                    << ", derivative = " << h_jacobian(i,j) << "\n";
+            //std::cout << "Param " << j << ": perturbed price = " << perturbed_price 
+                    //<< ", diff = " << perturbed_price - base_price 
+                    //<< ", derivative = " << h_jacobian(i,j) << "\n";
         }
     }
 
@@ -1359,7 +1400,7 @@ void compute_heston_jacobian(
     Kokkos::deep_copy(jacobian, h_jacobian);
 }
 
-
+//this is wrong
 void test_heston_jacobian() {
     // Market parameters
     const double S_0 = 100.0;  // Initial stock price
@@ -1388,7 +1429,7 @@ void test_heston_jacobian() {
     const int m1 = 50;          // Stock grid points
     const int m2 = 25;          // Variance grid points
     const int N = 20;           // Time steps
-    const double eps = 0.0;    // Parameter perturbation size
+    const double eps = 1e-6;     // Parameter perturbation size
 
     // Create Jacobian matrix
     Kokkos::View<double**> jacobian("jacobian", num_strikes, 5);
@@ -1463,7 +1504,7 @@ void test_sequential_J() {
     const int m1 = 50;
     const int m2 = 25;
 
-    const int nInstances = 5;
+    const int nInstances = 10;
 
     //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
     //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
@@ -1674,13 +1715,6 @@ void test_sequential_J() {
         // Reset workspace to initial condition
         Kokkos::deep_copy(workspace.U, U_0);
 
-        /*
-        // After kernel completes, verify matrices were built with correct parameters
-        std::cout << "Matrix building verification:\n";
-        std::cout << "A0 built with rho = " << h_params(3) << ", sigma = " << h_params(2) << "\n";
-        std::cout << "A2 built with kappa = " << h_params(0) << ", eta = " << h_params(1) 
-                  << ", sigma = " << h_params(2) << "\n";
-        */
     }
     auto t_end = timer::now();
     std::cout << "This is a tentative time, there is device host copying done in between" << std::endl;
@@ -1714,9 +1748,9 @@ void test_device_class() {
     //test_parallel_DO_method();  
     //test_deviceCallable_Do_solver();
 
-    //test_jacobian_computation();
+    test_jacobian_computation();
     //test_heston_jacobian();
-    test_sequential_J();
+    //test_sequential_J();
   }
   Kokkos::finalize();
  
