@@ -18,6 +18,7 @@
 #include "hes_a0_kernels.hpp"
 
 #include "device_solver.hpp"
+#include "heston_calibration.hpp"
 
 #include <iostream>
 
@@ -61,7 +62,8 @@ int main(int argc, char* argv[]) {
     Test for a device callable class
 
     */
-    test_device_class();
+    //test_device_class();
+    test_heston_calibration();
 
 
 

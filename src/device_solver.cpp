@@ -794,6 +794,7 @@ First for loop test for jacobian
 
 */
 //works! Only v0 will need to do a "trick" to get the FD approximation
+//Best method so far in terms of speed!
 void test_jacobian_computation() {
     using timer = std::chrono::high_resolution_clock;
     using Device = Kokkos::DefaultExecutionSpace;
@@ -823,7 +824,7 @@ void test_jacobian_computation() {
     const double eps = 1e-6;  // Perturbation size, should be Order of the error we are making in the Option computation
 
     // Setup strikes and market data
-    const int num_strikes = 500;
+    const int num_strikes = 10;
     std::vector<double> strikes(num_strikes);
     for(int i = 0; i < num_strikes; ++i) {
         strikes[i] = 90.0 + i;  // Strikes 
@@ -1044,7 +1045,7 @@ void test_jacobian_computation() {
             // Now you can use these indices directly
             const double base_price = U_i(index_s + index_v*(m1+1));
 
-            // Loop over parameters for finite differences
+            //FD approx of the parameters
             for(int param = 0; param < 5; param++) {
                 // Special handling for V0 (param == 4)
                if(param == 4) {  // V0 perturbation
@@ -1101,6 +1102,64 @@ void test_jacobian_computation() {
                     J(instance, param) = (pert_price - base_price) / eps;
                 }
             }
+
+            // Loop over parameters for finite differences, this excludes v0 in the loop and treats it seperately
+            //same result of course but surprisingly not a whole lot faster
+            /*
+            for(int param = 0; param < 4; param++) {
+                // Handle other parameters as before
+                double kappa_p = kappa;
+                double eta_p = eta;
+                double sigma_p = sigma;
+                double rho_p = rho;
+
+                switch(param) {
+                    case 0: kappa_p += eps; break;
+                    case 1: eta_p += eps; break;
+                    case 2: sigma_p += eps; break;
+                    case 3: rho_p += eps; break;
+                }
+
+                // Reset initial condition
+                for(int idx = 0; idx < total_size; idx++) {
+                    U_i(idx) = U_0_i(idx);
+                }
+
+                // Rebuild matrices with perturbed parameter
+                A0_solvers(instance).build_matrix(grid_i, rho_p, sigma_p, team);
+                A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+                A2_solvers(instance).build_matrix(grid_i, r_d, kappa_p, eta_p, sigma_p, theta, delta_t, team);
+
+                // Compute perturbed solution
+                device_DO_timestepping<Device, decltype(U_i)>(
+                    m1, m2, N, delta_t, theta, r_f,
+                    A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
+                    bounds, U_i, Y_0_i, Y_1_i,
+                    A0_result_i, A1_result_i, A2_result_unshuf_i,
+                    U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
+                    team
+                );
+
+                // Store results
+                double pert_price = U_i(index_s + index_v*(m1+1));
+                pert_prices(instance, param) = pert_price;
+                J(instance, param) = (pert_price - base_price) / eps;
+            }
+            // Special handling for V0 (param == 4)
+            const int param = 4;
+            const int lower_idx = v0_interp_data(instance, 0);
+            const int upper_idx = v0_interp_data(instance, 1);
+            const double weight = v0_interp_data(instance, 2);
+            
+            // Get prices at S_0 for both variance levels
+            const double price_lower = U_i(index_s + lower_idx*(m1+1));
+            const double price_upper = U_i(index_s + upper_idx*(m1+1));
+            
+            // Interpolate price at perturbed V0
+            const double pert_price = price_lower + weight * (price_upper - price_lower);
+            pert_prices(instance, param) = pert_price;
+            J(instance, param) = (pert_price - base_price) / eps;
+            */
         });
         Kokkos::fence();
 
@@ -1109,14 +1168,15 @@ void test_jacobian_computation() {
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
 
-    /*
+    
     // Print Jacobian matrix
+    
     auto h_J = Kokkos::create_mirror_view(J);
     Kokkos::deep_copy(h_J, J);
     
     
     // Column headers
-    int precision = 6;
+    int precision = 12;
     int column_width = precision + 10; // Ensure enough space for large numbers
     int strike_width = 10;
 
@@ -1143,7 +1203,7 @@ void test_jacobian_computation() {
         }
         std::cout << "\n";
     }
-    */
+    
     
    //Printing prices
    /*
@@ -1192,8 +1252,8 @@ void test_jacobian_computation() {
 Parallising the entire matrix
 
 */
-//wrong
-void compute_heston_jacobian(
+//wrong and seems to be suboptimal for runtime. The best choice so far was the for loop isnide the kernel
+void test_compute_heston_jacobian(
     // Market parameters
     const double S_0,              // Initial stock price
     const double V_0,              // Initial variance
@@ -1401,11 +1461,12 @@ void compute_heston_jacobian(
     });
     Kokkos::fence();
 
+    
     auto t_end = timer::now();
     std::cout << "Parallel Jacobian computation time: "
             << std::chrono::duration<double>(t_end - t_start).count()
             << " seconds\n";
-
+    /*
     // Extract results and build Jacobian
     auto h_U = Kokkos::create_mirror_view(workspace.U);
     Kokkos::deep_copy(h_U, workspace.U);
@@ -1451,12 +1512,14 @@ void compute_heston_jacobian(
                     //<< ", derivative = " << h_jacobian(i,j) << "\n";
         }
     }
-
+    
     // Copy Jacobian back to device
     Kokkos::deep_copy(jacobian, h_jacobian);
+    */
 }
 
-//this is wrong
+//this is wrong and super duper slow! This parallises the entire matrix,
+//but apparently the for loop appraoch is way better utilizing the GPU
 void test_heston_jacobian() {
     // Market parameters
     const double S_0 = 100.0;  // Initial stock price
@@ -1475,7 +1538,7 @@ void test_heston_jacobian() {
     };
 
     // Create array of strikes around S_0
-    const int num_strikes = 5;
+    const int num_strikes = 30;
     std::vector<double> strikes(num_strikes);
     for(int i = 0; i < num_strikes; ++i) {
         strikes[i] = 90.0 + i;  // Strikes 
@@ -1500,7 +1563,7 @@ void test_heston_jacobian() {
                 << ", v0 = " << params[4] << "\n\n";
 
     // Compute Jacobian
-    compute_heston_jacobian(
+    test_compute_heston_jacobian(
         S_0, V_0, T, r_d, r_f,
         params, strikes,
         m1, m2, N, eps,
@@ -1531,6 +1594,8 @@ void test_heston_jacobian() {
 sequential J
 
 */
+//works, but it is slower than the test_jacobian_computation().
+//thiis here also just computes the pertubed prices and does not do the Trick for v0. 
 void test_sequential_J() {
     using timer = std::chrono::high_resolution_clock;
     using Device = Kokkos::DefaultExecutionSpace;
@@ -1734,8 +1799,8 @@ void test_sequential_J() {
                     team
                 );
         });
-        Kokkos::fence();
 
+        /*
         // Get results for this parameter
         auto h_U = Kokkos::create_mirror_view(workspace.U);
         Kokkos::deep_copy(h_U, workspace.U);
@@ -1767,7 +1832,7 @@ void test_sequential_J() {
             double price = h_U(inst, index_s + index_v*(m1+1));
             h_perturbed_prices(param_idx, inst) = price;
         }
-
+        */
         // Reset workspace to initial condition
         Kokkos::deep_copy(workspace.U, U_0);
 
@@ -1779,7 +1844,7 @@ void test_sequential_J() {
             << " seconds\n";
 
     // Print final results
-    
+    /*
     std::cout << "\nPerturbed prices for each parameter:\n";
     for(int param_idx = 0; param_idx < 5; param_idx++) {
         std::cout << "\nParameter " <<  param_names[param_idx] << " perturbation:\n";
@@ -1788,6 +1853,7 @@ void test_sequential_J() {
                     << std::setprecision(16) << h_perturbed_prices(param_idx, inst) << "\n";
         }
     }
+    */
     
 }
 

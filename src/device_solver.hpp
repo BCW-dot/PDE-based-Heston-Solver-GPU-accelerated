@@ -1,10 +1,14 @@
 #pragma once
 #include <Kokkos_Core.hpp>
+
 #include "hes_a0_kernels.hpp"
 #include "hes_a1_kernels.hpp"
 #include "hes_a2_shuffled_kernels.hpp"
 #include "hes_boundary_kernels.hpp"
 
+#include "DO_solver_workspace.hpp"
+
+/*
 template<class Device>
 struct DO_Workspace {
     // Main solution arrays
@@ -36,6 +40,7 @@ struct DO_Workspace {
         U_next_shuffled = Kokkos::View<double**, Device>("U_next_shuffled", nInstances, total_size);
     }
 };
+*/
 
 
 /*
