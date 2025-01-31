@@ -823,13 +823,14 @@ void test_jacobian_computation() {
     const double eps = 1e-6;  // Perturbation size, should be Order of the error we are making in the Option computation
 
     // Setup strikes and market data
-    const int num_strikes = 10;
+    const int num_strikes = 500;
     std::vector<double> strikes(num_strikes);
     for(int i = 0; i < num_strikes; ++i) {
         strikes[i] = 90.0 + i;  // Strikes 
     }
 
     std::cout << "Computing Jacobian for " << num_strikes << " strikes\n";
+    std::cout << "Total PDE solves: " << num_strikes * 6 << std::endl;
     std::cout << "Base parameters: kappa=" << kappa << ", eta=" << eta 
               << ", sigma=" << sigma << ", rho=" << rho << ", V_0=" << V_0 << "\n";
 
@@ -918,7 +919,78 @@ void test_jacobian_computation() {
     
     // Storage for base and perturbed prices
     Kokkos::View<double*> base_prices("base_prices", num_strikes);
-    Kokkos::View<double**> pert_prices("pert_prices", num_strikes, 5);  
+    Kokkos::View<double**> pert_prices("pert_prices", num_strikes, 5);
+
+    
+    // Get indices for price extraction
+    // Before your main computation, create a view for storing indices
+    Kokkos::View<int**> price_indices("price_indices", num_strikes, 2);  // [num_strikes][2] for s and v indices
+    auto h_price_indices = Kokkos::create_mirror_view(price_indices);
+
+    // Compute indices on host for price extraction
+    for(int strike_idx = 0; strike_idx < num_strikes; ++strike_idx) {
+        auto grid = hostGrids[strike_idx];
+        auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
+        auto h_Vec_v = Kokkos::create_mirror_view(grid.device_Vec_v);
+        
+        Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
+        Kokkos::deep_copy(h_Vec_v, grid.device_Vec_v);
+        
+        // Find s index
+        for(int i = 0; i <= m1; i++) {
+            if(std::abs(h_Vec_s(i) - S_0) < 1e-10) {
+                h_price_indices(strike_idx, 0) = i;  // Store s index
+                break;
+            }
+        }
+        
+        // Find v index
+        for(int i = 0; i <= m2; i++) {
+            if(std::abs(h_Vec_v(i) - V_0) < 1e-10) {
+                h_price_indices(strike_idx, 1) = i;  // Store v index
+                break;
+            }
+        }
+    }
+    
+    // Copy indices to device
+    Kokkos::deep_copy(price_indices, h_price_indices);  
+
+    // Create a view for V0 interpolation data [num_strikes][4]:
+    // [0]: lower_idx
+    // [1]: upper_idx
+    // [2]: interpolation weight
+    // [3]: (v_upper - v_lower) for validation
+    Kokkos::View<double**> v0_interp_data("v0_interp_data", num_strikes, 4);
+    auto h_v0_interp_data = Kokkos::create_mirror_view(v0_interp_data);
+
+    // Compute interpolation data on host
+    const double v0_pert = V_0 + eps;
+    for(int strike_idx = 0; strike_idx < num_strikes; ++strike_idx) {
+        auto grid = hostGrids[strike_idx];
+        auto h_Vec_v = Kokkos::create_mirror_view(grid.device_Vec_v);
+        Kokkos::deep_copy(h_Vec_v, grid.device_Vec_v);
+        
+        // Find bracketing points
+        for(int i = 0; i < m2; i++) {
+            if(h_Vec_v(i) <= v0_pert && v0_pert <= h_Vec_v(i+1)) {
+                // Store indices
+                h_v0_interp_data(strike_idx, 0) = i;          // lower_idx
+                h_v0_interp_data(strike_idx, 1) = i + 1;      // upper_idx
+                
+                // Compute and store interpolation weight
+                double v_lower = h_Vec_v(i);
+                double v_upper = h_Vec_v(i+1);
+                h_v0_interp_data(strike_idx, 2) = (v0_pert - v_lower) / (v_upper - v_lower);  // weight
+                h_v0_interp_data(strike_idx, 3) = v_upper - v_lower;  // store difference for validation
+                break;
+            }
+        }
+    }
+
+    // Copy to device
+    Kokkos::deep_copy(v0_interp_data, h_v0_interp_data);
+    
 
     using team_policy = Kokkos::TeamPolicy<>;
     team_policy policy(num_strikes, Kokkos::AUTO);
@@ -964,66 +1036,30 @@ void test_jacobian_computation() {
                 U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
                 team
             );
-
+            
             // Get indices for price extraction
-            int index_s = -1;
-            int index_v = -1;
-            for(int i = 0; i <= m1; i++) {
-                if(abs(grid_i.device_Vec_s(i) - S_0) < 1e-10) {
-                    index_s = i;
-                    break;
-                }
-            }
-            for(int i = 0; i <= m2; i++) {
-                if(abs(grid_i.device_Vec_v(i) - V_0) < 1e-10) {
-                    index_v = i;
-                    break;
-                }
-            }
+            const int index_s = price_indices(instance, 0);
+            const int index_v = price_indices(instance, 1);
 
-            // Store base price
+            // Now you can use these indices directly
             const double base_price = U_i(index_s + index_v*(m1+1));
-            base_prices(instance) = base_price;
 
             // Loop over parameters for finite differences
             for(int param = 0; param < 5; param++) {
                 // Special handling for V0 (param == 4)
-                if(param == 4) {
-                    //this is a cheat for the pertubation at V0. Since we just take the next variance value inside the grid
-                    double pert_price = U_i(index_s + (index_v + 1)*(m1+1));
+               if(param == 4) {  // V0 perturbation
+                    const int lower_idx = v0_interp_data(instance, 0);
+                    const int upper_idx = v0_interp_data(instance, 1);
+                    const double weight = v0_interp_data(instance, 2);
+                    
+                    // Get prices at S_0 for both variance levels
+                    const double price_lower = U_i(index_s + lower_idx*(m1+1));
+                    const double price_upper = U_i(index_s + upper_idx*(m1+1));
+                    
+                    // Interpolate price at perturbed V0
+                    const double pert_price = price_lower + weight * (price_upper - price_lower);
                     pert_prices(instance, param) = pert_price;
                     J(instance, param) = (pert_price - base_price) / eps;
-                    //this extrapolates the Option price at V0+eps
-                    /*
-                    // Find bracketing variance points for V0 + eps
-                    double v0_pert = V_0 + eps;
-                    int lower_idx = -1;
-                    int upper_idx = -1;
-                    
-                    for(int i = 0; i < m2; i++) {
-                        if(grid_i.device_Vec_v(i) <= v0_pert && v0_pert <= grid_i.device_Vec_v(i+1)) {
-                            lower_idx = i;
-                            upper_idx = i + 1;
-                            break;
-                        }
-                    }
-
-                    if(lower_idx != -1) {  // Found bracketing points
-                        // Compute interpolation weights
-                        double v_lower = grid_i.device_Vec_v(lower_idx);
-                        double v_upper = grid_i.device_Vec_v(upper_idx);
-                        double weight = (v0_pert - v_lower) / (v_upper - v_lower);
-                        
-                        // Get prices at S_0 for both variance levels
-                        double price_lower = U_i(index_s + lower_idx*(m1+1));
-                        double price_upper = U_i(index_s + upper_idx*(m1+1));
-                        
-                        // Interpolate price at perturbed V0
-                        double pert_price = price_lower + weight * (price_upper - price_lower);
-                        pert_prices(instance, param) = pert_price;
-                        J(instance, param) = (pert_price - base_price) / eps;
-                    }
-                    */
                 }
                 else {
                     // Handle other parameters as before
@@ -1073,31 +1109,50 @@ void test_jacobian_computation() {
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
 
-    
+    /*
     // Print Jacobian matrix
     auto h_J = Kokkos::create_mirror_view(J);
     Kokkos::deep_copy(h_J, J);
     
-    /*
+    
+    // Column headers
+    int precision = 6;
+    int column_width = precision + 10; // Ensure enough space for large numbers
+    int strike_width = 10;
+
     std::cout << "\nJacobian matrix:\n";
-    std::cout << "Strike   κ       η       σ       ρ       v0\n";
-    std::cout << std::fixed << std::setprecision(6);
+    std::cout << std::fixed << std::setprecision(precision);
+
+    // Print header
+    std::cout << std::setw(strike_width) << "Strike" 
+              << std::setw(column_width) << "κ"
+              << std::setw(column_width) << "η"
+              << std::setw(column_width) << "σ"
+              << std::setw(column_width) << "ρ"
+              << std::setw(column_width) << "v0"
+              << "\n";
+
+    // Separator line (adjusted width)
+    std::cout << std::string(strike_width + 5 * column_width, '-') << "\n";
+
+    // Data rows
     for(int i = 0; i < num_strikes; i++) {
-        std::cout << strikes[i] << "  ";
+        std::cout << std::setw(strike_width) << strikes[i];
         for(int j = 0; j < 5; j++) {
-            std::cout << h_J(i,j) << "  ";
+            std::cout << std::setw(column_width) << h_J(i,j);
         }
         std::cout << "\n";
     }
     */
     
    //Printing prices
-   
+   /*
     auto h_base_prices = Kokkos::create_mirror_view(base_prices);
     auto h_pert_prices = Kokkos::create_mirror_view(pert_prices);
     Kokkos::deep_copy(h_base_prices, base_prices);
     Kokkos::deep_copy(h_pert_prices, pert_prices);
 
+    
     std::cout << "\nBase and perturbed prices:\n";
     std::cout << std::setw(10) << "Strike" << std::setw(15) << "Base Price" 
             << std::setw(15) << "κ pert" << std::setw(15) << "η pert" 
@@ -1126,6 +1181,7 @@ void test_jacobian_computation() {
         }
         std::cout << "\n";
     }
+    */
     
     
 }
