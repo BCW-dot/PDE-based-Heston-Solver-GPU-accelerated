@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 
+//THIS IS WRONG; THE CALL PRICES ARE COMPUTED NOT CORRECTLY I STRONGLY BELIEF
 class BlackScholes {
 private:
     // Constants for normal CDF approximation
