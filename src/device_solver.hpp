@@ -160,7 +160,6 @@ void parallel_DO_solve(
                 A2_solvers(instance).solve_implicit_parallel_s(U_next_shuffled_i, Y_1_shuffled_i, team);
                 device_unshuffle_vector(U_next_shuffled_i, U_i, m1, m2, team);
             }
-            
             // Find s index
             int index_s = -1;
             int index_v = -1;
@@ -184,6 +183,7 @@ void parallel_DO_solve(
     });
     Kokkos::fence();
 }
+
 
 
 /*

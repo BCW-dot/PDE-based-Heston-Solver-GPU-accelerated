@@ -539,7 +539,8 @@ void test_parallel_DO_method() {
     auto h_base_prices = Kokkos::create_mirror_view(base_prices);
     Kokkos::deep_copy(h_base_prices, base_prices);
 
-    for(int inst = 0; inst < min(5,nInstances); ++inst) {
+    /*
+    for(int inst = 0; inst < min(10,nInstances); ++inst) {
         // Create host mirrors for the grid views
         auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_s);
         auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_v);
@@ -569,7 +570,15 @@ void test_parallel_DO_method() {
         
         std::cout << "Instance " << inst 
                   << " Strike " << strikes[inst] 
-                << ": Price = " << std::setprecision(16) << price << "\n"
+                << ": Price = " << std::setprecision(16) << price << "\n";
+                //<< ": base price index comp Price = " << std::setprecision(16) << h_base_prices(inst) << "\n";
+                //<< ", Relative Error = " << rel_error << "\n";
+    }
+    */
+
+    for(int inst = 0; inst <  min(10,nInstances); ++inst) {
+        std::cout << "Instance " << inst 
+                  << " Strike "  << strikes[inst] 
                 << ": base price index comp Price = " << std::setprecision(16) << h_base_prices(inst) << "\n";
                 //<< ", Relative Error = " << rel_error << "\n";
     }

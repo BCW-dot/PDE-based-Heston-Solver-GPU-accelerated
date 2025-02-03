@@ -12,6 +12,10 @@
 #include <string>
 #include <vector>
 
+#include <fstream>  // For std::ofstream
+#include <iostream> // For std::cerr, std::cout
+
+
 #include <Kokkos_Core.hpp>
 #include <KokkosBlas2_gemv.hpp> // for gemv
 #include <KokkosBlas3_gemm.hpp> // for gemm
@@ -240,8 +244,6 @@ void compute_jacobian(
     const Kokkos::View<GridViews*>& deviceGrids,
     const Kokkos::View<double**>& U_0,
     DO_Workspace<Kokkos::DefaultExecutionSpace>& workspace,
-    //precomputed Price extraction as well as Interpolation
-    const Kokkos::View<int**>& price_indices,
     // Output matrix
     Kokkos::View<double**>& J,
     Kokkos::View<double*>& base_prices,
@@ -294,8 +296,17 @@ void compute_jacobian(
                 team
             );
             
+            //The s direction can be precomputed
             // Get indices for price extraction
-            const int index_s = price_indices(instance, 0);
+            // Find s index
+            int index_s = -1;
+            //int index_v = -1;
+            for(int i = 0; i <= m1; i++) {
+                if(Kokkos::abs(grid_i.device_Vec_s(i) - S_0) < 1e-10) {
+                    index_s = i;  // Store s index
+                    break;
+                }
+            }
             const int index_v = grid_i.find_v0_index(V_0);
 
             // Now you can use these indices directly
@@ -474,7 +485,7 @@ void test_jacobian_method(){
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = 90.0 + i;  // Strikes
+        strikes[i] = 100.0 + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -580,34 +591,7 @@ void test_jacobian_method(){
     
     // Storage for base and perturbed prices
     Kokkos::View<double*> base_prices("base_prices", num_strikes);
-    Kokkos::View<double**> pert_prices("pert_prices", num_strikes, 5);
-
-    
-    // Get indices for price extraction
-    // Before your main computation, create a view for storing indices
-    Kokkos::View<int**> price_indices("price_indices", num_strikes, 1);  // [num_strikes][1] for s 
-    auto h_price_indices = Kokkos::create_mirror_view(price_indices);
-
-    // Compute indices on host for price extraction
-    for(int strike_idx = 0; strike_idx < num_strikes; ++strike_idx) {
-        auto grid = hostGrids[strike_idx];
-        auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
-        auto h_Vec_v = Kokkos::create_mirror_view(grid.device_Vec_v);
-        
-        Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
-        Kokkos::deep_copy(h_Vec_v, grid.device_Vec_v);
-        
-        // Find s index
-        for(int i = 0; i <= m1; i++) {
-            if(std::abs(h_Vec_s(i) - S_0) < 1e-10) {
-                h_price_indices(strike_idx, 0) = i;  // Store s index
-                break;
-            }
-        }
-    }
-    
-    // Copy indices to device
-    Kokkos::deep_copy(price_indices, h_price_indices);  
+    Kokkos::View<double**> pert_prices("pert_prices", num_strikes, 5); 
 
     // First compute base prices
     auto t_start = timer::now();
@@ -624,8 +608,6 @@ void test_jacobian_method(){
         A0_solvers, A1_solvers, A2_solvers,
         bounds_d, deviceGrids,
         U_0, workspace,
-        // Price extraction and interpolation data
-        price_indices,
         // Output matrix
         J, base_prices,
         // Perturbation size (optional)
@@ -746,6 +728,13 @@ void test_jacobian_method(){
         }
         std::cout << "\n";
     }
+
+    for(int inst = 0; inst < num_strikes; ++inst) {
+        std::cout << "Instance " << inst 
+                  << " Strike " << std::setprecision(2) << strikes[inst] 
+                << ": base price index comp Price = " << std::setprecision(16) << h_base_prices(inst) << "\n";
+                //<< ", Relative Error = " << rel_error << "\n";
+    }
     
 }
 
@@ -766,10 +755,16 @@ void test_basic_calibration(){
     const double r_f = 0.0;
 
     // Current parameter set
+    /*
     const double rho = -0.9;
     const double sigma = 0.3;
     const double kappa = 1.5;
     const double eta = 0.04;
+    */
+    const double rho = -0.4;
+    const double sigma = 0.02;
+    const double kappa = 4;
+    const double eta = 0.09;
     
     // Numerical parameters
     const int m1 = 50;
@@ -782,11 +777,11 @@ void test_basic_calibration(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 5;
+    const int num_strikes = 20;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = 90.0 + i;  // Strikes
+        strikes[i] = S_0 - int(num_strikes/2) + i;//90.0 + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -892,34 +887,7 @@ void test_basic_calibration(){
     
     // Storage for base and perturbed prices
     Kokkos::View<double*> base_prices("base_prices", num_strikes);
-    Kokkos::View<double**> pert_prices("pert_prices", num_strikes, 5);
-
-    
-    // Get indices for price extraction
-    // Before your main computation, create a view for storing indices
-    Kokkos::View<int**> price_indices("price_indices", num_strikes, 1);  // [num_strikes][1] for s 
-    auto h_price_indices = Kokkos::create_mirror_view(price_indices);
-
-    // Compute indices on host for price extraction
-    for(int strike_idx = 0; strike_idx < num_strikes; ++strike_idx) {
-        auto grid = hostGrids[strike_idx];
-        auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
-        auto h_Vec_v = Kokkos::create_mirror_view(grid.device_Vec_v);
-        
-        Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
-        Kokkos::deep_copy(h_Vec_v, grid.device_Vec_v);
-        
-        // Find s index
-        for(int i = 0; i <= m1; i++) {
-            if(std::abs(h_Vec_s(i) - S_0) < 1e-10) {
-                h_price_indices(strike_idx, 0) = i;  // Store s index
-                break;
-            }
-        }
-    }
-    
-    // Copy indices to device
-    Kokkos::deep_copy(price_indices, h_price_indices);  
+    Kokkos::View<double**> pert_prices("pert_prices", num_strikes, 5);  
 
     // First compute base prices
     auto t_start = timer::now();
@@ -939,16 +907,20 @@ void test_basic_calibration(){
     double lambda = 0.1; // Initial LM parameter
     bool converged = false;
 
+    int final_error = 100;
+
     // Main iteration loop
     for(int iter = 0; iter < max_iter && !converged; iter++) {
         auto iter_start = timer::now();
         std::cout << "\nIteration " << iter + 1 << " of " << max_iter << std::endl;
-        std::cout << "Current parameters: κ=" << current_kappa 
-                << ", η=" << current_eta 
-                << ", σ=" << current_sigma 
-                << ", ρ=" << current_rho 
-                << ", v₀=" << current_v0 << std::endl;
+        //std::cout << "Current parameters: κ=" << current_kappa 
+                //<< ", η=" << current_eta 
+                //<< ", σ=" << current_sigma 
+                //<< ", ρ=" << current_rho 
+                //<< ", v₀=" << current_v0 << std::endl;
 
+        //need to reset the Inital condition
+        Kokkos::deep_copy(workspace.U, U_0); 
         // Compute Jacobian and base prices with current parameters
         compute_jacobian(
             S_0, current_v0, T,
@@ -959,7 +931,6 @@ void test_basic_calibration(){
             A0_solvers, A1_solvers, A2_solvers,
             bounds_d, deviceGrids,
             U_0, workspace,
-            price_indices,
             J, base_prices,
             eps
         );
@@ -987,14 +958,29 @@ void test_basic_calibration(){
 
         // Compute new prices with updated parameters
         Kokkos::deep_copy(workspace.U, U_0); //donno if this is needed
-        //we will need to rebuild the Vec_v Views here as well!
-        std::cout<< "rebuild V0 here" << std::endl;
+        //Rebuilding is done inside, does not work yet tho
+        //also the wrong option prices are retuned in this method for some reason. The jacobian does it correctly
+        /*
         parallel_DO_solve(
-        num_strikes, S_0, V_0, m1, m2, N, T, delta_t, theta,
+        num_strikes, S_0, new_v0, m1, m2, N, T, delta_t, theta,
         r_d, r_f, new_rho, new_sigma, new_kappa, new_eta,
         A0_solvers, A1_solvers, A2_solvers,
         bounds_d, deviceGrids,
         workspace, base_prices);
+        */
+       //the parallel do method does not work for some reason. so we use the comput jacobain again but only to get the new base prices
+        compute_jacobian(
+                S_0, new_v0, T,
+                r_d, r_f,
+                new_rho, new_sigma, new_kappa, new_eta,
+                m1, m2, total_size, N, theta, delta_t,
+                num_strikes,
+                A0_solvers, A1_solvers, A2_solvers,
+                bounds_d, deviceGrids,
+                U_0, workspace,
+                J, base_prices,
+                eps
+            );
 
         // Compute new residuals
         Kokkos::parallel_for("compute_new_residuals", num_strikes, 
@@ -1042,6 +1028,7 @@ void test_basic_calibration(){
         std::cout << "Iteration time: "
                 << std::chrono::duration<double>(iter_end - iter_start).count()
                 << " seconds" << std::endl;
+        final_error = std::sqrt(new_error);
     }
 
     // Print final results
@@ -1056,6 +1043,47 @@ void test_basic_calibration(){
     std::cout << "Total time after Updating parameters: "
               << std::chrono::duration<double>(t_end_second - t_start).count()
               << " seconds" << std::endl;
+
+    // ================================================================
+    // ============ Export final results to CSV for Python ============
+    // ================================================================
+
+    // Choose a filename
+    std::string csv_filename = "fitted_heston_vs_market.csv";
+    std::ofstream out(csv_filename);
+    if (!out.is_open()) {
+        std::cerr << "Error: Cannot open file for writing: " << csv_filename << std::endl;
+        return;
+    }
+
+    // Write a title/comment line:
+    //   - number of options
+    //   - total runtime
+    //   - final error
+    double total_time = std::chrono::duration<double>(t_end_second - t_start).count();
+    out << "# " << num_strikes 
+        << " options, Time=" << total_time 
+        << " s, FinalError=" << final_error 
+        << "\n";
+
+    // Write CSV header
+    out << "Strike,MarketPrice,FittedPrice\n";
+
+    // Copy device -> host for market and fitted prices
+    auto h_base_prices   = Kokkos::create_mirror_view(base_prices);
+    Kokkos::deep_copy(h_base_prices,   base_prices);
+    Kokkos::deep_copy(h_market_prices, market_prices);
+
+    // Write each line: Strike, MarketPrice, FittedHestonPrice
+    for (int i = 0; i < num_strikes; ++i) {
+        out << strikes[i] 
+            << "," << h_market_prices(i) 
+            << "," << h_base_prices(i) 
+            << "\n";
+    }
+
+    out.close();
+    std::cout << "Exported final results to " << csv_filename << std::endl;
     
 }
 
