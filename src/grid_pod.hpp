@@ -43,12 +43,15 @@ struct GridViews {
 
         // Sort the array (can implement a parallel sort if needed)
         // For now using a simple bubble sort since it's device-callable
-        for(int i = 0; i < m2 + 2; i++) {
-            for(int j = 0; j < m2 + 1 - i; j++) {
-                if(temp_v(j) > temp_v(j + 1)) {
-                    double temp = temp_v(j);
-                    temp_v(j) = temp_v(j + 1);
-                    temp_v(j + 1) = temp;
+        // Sequential bubble sort done by single thread
+        if(team.team_rank() == 0) {
+            for(int i = 0; i < m2 + 2; i++) {
+                for(int j = 0; j < m2 + 1 - i; j++) {
+                    if(temp_v(j) > temp_v(j + 1)) {
+                        double temp = temp_v(j);
+                        temp_v(j) = temp_v(j + 1);
+                        temp_v(j + 1) = temp;
+                    }
                 }
             }
         }

@@ -162,6 +162,7 @@ void compute_parameter_update_on_device(
         std::cout << "\n";
     }
     */
+    
 
     // 2. Add lambda on diagonal
     Kokkos::parallel_for("add_lambda_diag", N, KOKKOS_LAMBDA(const int i){
@@ -743,9 +744,6 @@ void test_basic_calibration(){
     using Device = Kokkos::DefaultExecutionSpace;
     using timer = std::chrono::high_resolution_clock;
 
-    const int max_iter = 10;
-    const double tol = 0.0015;
-
     // Market parameters
     const double S_0 = 100.0;
     const double V_0 = 0.04;
@@ -755,16 +753,19 @@ void test_basic_calibration(){
     const double r_f = 0.0;
 
     // Current parameter set
-    /*
+    
     const double rho = -0.9;
     const double sigma = 0.3;
     const double kappa = 1.5;
     const double eta = 0.04;
+    
+   
+   /*
+    const double rho = -0.7;
+    const double sigma = 0.8;
+    const double kappa = 0.3;
+    const double eta = 0.1;
     */
-    const double rho = -0.4;
-    const double sigma = 0.02;
-    const double kappa = 4;
-    const double eta = 0.09;
     
     // Numerical parameters
     const int m1 = 50;
@@ -777,19 +778,25 @@ void test_basic_calibration(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 20;
+    const int num_strikes = 40;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 - int(num_strikes/2) + i;//90.0 + i;  // Strikes
+        strikes[i] = S_0 * (0.3 + i * 0.05); //S_0 - num_strikes + i;//90.0 + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
+    const int max_iter = 10;
+    const double tol = 0.01;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
+
+
+
     std::cout << "Computing Jacobian for " << num_strikes << " strikes\n";
-    std::cout << "Total PDE solves: " << num_strikes * 6 << std::endl;
+    std::cout << "Total PDE solves: " << num_strikes * (6 + 1) << std::endl; //base_price + param_pertubation + new error computation
     std::cout << "Base parameters: kappa=" << kappa << ", eta=" << eta 
               << ", sigma=" << sigma << ", rho=" << rho << ", V_0=" << V_0 << "\n";
+    std::cout << "Tolerance: " << tol << std::endl;
 
     Kokkos::View<double*> market_prices("market_prices", num_strikes);
     auto h_market_prices = Kokkos::create_mirror_view(market_prices);
@@ -935,6 +942,43 @@ void test_basic_calibration(){
             eps
         );
 
+        //printing Jacobian
+        /*
+        auto h_J = Kokkos::create_mirror_view(J);
+        Kokkos::deep_copy(h_J, J);
+        
+        
+        // Column headers
+        int precision = 12;
+        int column_width = precision + 10; // Ensure enough space for large numbers
+        int strike_width = 10;
+
+        std::cout << "\nJacobian matrix:\n";
+        std::cout << std::fixed << std::setprecision(precision);
+        
+        // Print header
+        std::cout << std::setw(strike_width) << "Strike" 
+                << std::setw(column_width) << "κ"
+                << std::setw(column_width) << "η"
+                << std::setw(column_width) << "σ"
+                << std::setw(column_width) << "ρ"
+                << std::setw(column_width) << "v0"
+                << "\n";
+
+        // Separator line (adjusted width)
+        std::cout << std::string(strike_width + 5 * column_width, '-') << "\n";
+        
+        // Data rows
+        for(int i = 0; i < num_strikes; i++) {
+            std::cout << std::setw(strike_width) << strikes[i];
+            for(int j = 0; j < 5; j++) {
+                std::cout << std::setw(column_width) << h_J(i,j);
+            }
+            std::cout << "\n";
+        }
+        */
+        
+
         // Compute current residuals
         Kokkos::parallel_for("compute_residuals", num_strikes, 
             KOKKOS_LAMBDA(const int i) {
@@ -981,6 +1025,7 @@ void test_basic_calibration(){
                 J, base_prices,
                 eps
             );
+        
 
         // Compute new residuals
         Kokkos::parallel_for("compute_new_residuals", num_strikes, 
