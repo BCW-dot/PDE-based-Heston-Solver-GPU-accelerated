@@ -415,7 +415,7 @@ void test_parallel_DO_method() {
     //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
     std::vector<double> strikes(nInstances,0.0);
     for(int i = 0; i < nInstances; ++i) {
-        strikes[i] = 90 + i;
+        strikes[i] = 100 + i;
     }
     
     // Solver parameters
@@ -509,20 +509,22 @@ void test_parallel_DO_method() {
     Kokkos::deep_copy(U_0, h_U_0);
     Kokkos::deep_copy(workspace.U, U_0);  // Copy initial condition to workspace
 
+    Kokkos::View<double*> base_prices("base_prices", nInstances);
+
     auto t_start = timer::now();
 
     // Call solver with workspace
-    for(int i = 0; i<5; i++){
+    //for(int i = 0; i<5; i++){
         
-        Kokkos::deep_copy(workspace.U, U_0);
+        //Kokkos::deep_copy(workspace.U, U_0);
 
         parallel_DO_solve(
-        nInstances, m1, m2, N, T, delta_t, theta,
+        nInstances, S_0, V_0, m1, m2, N, T, delta_t, theta,
         r_d, r_f, rho, sigma, kappa, eta,
         A0_solvers, A1_solvers, A2_solvers,
         bounds_d, deviceGrids,
-        workspace);
-    }
+        workspace, base_prices);
+    //}
 
     auto t_end = timer::now();
     std::cout << "Parallel DO time: "
@@ -532,6 +534,10 @@ void test_parallel_DO_method() {
     //Results processing uses workspace.U instead of U
     auto h_U = Kokkos::create_mirror_view(workspace.U);
     Kokkos::deep_copy(h_U, workspace.U);
+
+    //check index computation inside kernel
+    auto h_base_prices = Kokkos::create_mirror_view(base_prices);
+    Kokkos::deep_copy(h_base_prices, base_prices);
 
     for(int inst = 0; inst < min(5,nInstances); ++inst) {
         // Create host mirrors for the grid views
@@ -563,7 +569,8 @@ void test_parallel_DO_method() {
         
         std::cout << "Instance " << inst 
                   << " Strike " << strikes[inst] 
-                << ": Price = " << std::setprecision(16) << price << "\n";
+                << ": Price = " << std::setprecision(16) << price << "\n"
+                << ": base price index comp Price = " << std::setprecision(16) << h_base_prices(inst) << "\n";
                 //<< ", Relative Error = " << rel_error << "\n";
     }
 }
@@ -1867,10 +1874,10 @@ void test_device_class() {
     //run_device_solver_example();
 
     //test_DEVICE_parallel_DO_scheme();  
-    //test_parallel_DO_method();  
+    test_parallel_DO_method();  
     //test_deviceCallable_Do_solver();
 
-    test_jacobian_computation();
+    //test_jacobian_computation();
     //test_heston_jacobian();
     //test_sequential_J();
   }

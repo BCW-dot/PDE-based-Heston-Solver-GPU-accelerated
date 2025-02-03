@@ -62,8 +62,8 @@ int main(int argc, char* argv[]) {
     Test for a device callable class
 
     */
-    //test_device_class();
-    test_heston_calibration();
+    test_device_class();
+    //test_heston_calibration();
 
 
 

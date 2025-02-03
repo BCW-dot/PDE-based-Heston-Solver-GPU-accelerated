@@ -16,8 +16,6 @@
 #include <KokkosBlas2_gemv.hpp> // for gemv
 #include <KokkosBlas3_gemm.hpp> // for gemm
 
-#include "bs.hpp" //for market prices
-
 // Function to generate synthetic market prices
 void generate_market_data(
     const double S_0,          // Spot price
@@ -149,6 +147,7 @@ void compute_parameter_update_on_device(
     KokkosBlas::gemm("T", "N", 1.0, J, J, 0.0, JTJ);
 
     // Print J^T J
+    /*
     auto h_JTJ = Kokkos::create_mirror_view(JTJ);
     Kokkos::deep_copy(h_JTJ, JTJ);
     std::cout << "\nJ^T J matrix before lambda modification:\n";
@@ -158,6 +157,7 @@ void compute_parameter_update_on_device(
         }
         std::cout << "\n";
     }
+    */
 
     // 2. Add lambda on diagonal
     Kokkos::parallel_for("add_lambda_diag", N, KOKKOS_LAMBDA(const int i){
@@ -165,6 +165,7 @@ void compute_parameter_update_on_device(
     });
 
     // Print modified matrix
+    /*
     Kokkos::deep_copy(h_JTJ, JTJ);
     std::cout << "\nJ^T J matrix after lambda modification (lambda = " << lambda << "):\n";
     for(int i = 0; i < N; i++) {
@@ -173,31 +174,37 @@ void compute_parameter_update_on_device(
         }
         std::cout << "\n";
     }
+    */
 
     // 3. Build J^T r => [5]
     Kokkos::View<double*> JTr("JTr", N);
     KokkosBlas::gemv("T", 1.0, J, residual, 0.0, JTr);
 
     // Print J^T r
+    /*
     auto h_JTr = Kokkos::create_mirror_view(JTr);
     Kokkos::deep_copy(h_JTr, JTr);
     std::cout << "\nJ^T r vector:\n";
     for(int i = 0; i < N; i++) {
         std::cout << std::scientific << std::setw(15) << h_JTr(i) << "\n";
     }
+    */
 
     // 4. Solve (JTJ) * delta = (JTr) on device with our manual 5x5 routine
     solve_5x5_device(JTJ, JTr, delta);
 
     // Print solution (delta)
+    /*
     auto h_delta = Kokkos::create_mirror_view(delta);
     Kokkos::deep_copy(h_delta, delta);
     std::cout << "\nSolution delta:\n";
     for(int i = 0; i < N; i++) {
         std::cout << std::scientific << std::setw(15) << h_delta(i) << "\n";
     }
+    */
 
     // Optional: verify solution by computing residual JTJ * delta - JTr
+    /*
     Kokkos::View<double*> verify("verify", N);
     KokkosBlas::gemv("N", 1.0, JTJ, delta, 0.0, verify);
     auto h_verify = Kokkos::create_mirror_view(verify);
@@ -211,6 +218,7 @@ void compute_parameter_update_on_device(
     }
     res_norm = std::sqrt(res_norm);
     std::cout << "||JTJ * delta - JTr|| = " << std::scientific << res_norm << "\n";
+    */
 }
 
 
@@ -234,7 +242,6 @@ void compute_jacobian(
     DO_Workspace<Kokkos::DefaultExecutionSpace>& workspace,
     //precomputed Price extraction as well as Interpolation
     const Kokkos::View<int**>& price_indices,
-    const Kokkos::View<double**>& v0_interp_data,
     // Output matrix
     Kokkos::View<double**>& J,
     Kokkos::View<double*>& base_prices,
@@ -267,6 +274,8 @@ void compute_jacobian(
             auto U_0_i = Kokkos::subview(U_0, instance, Kokkos::ALL);  // Get initial condition
 
             GridViews grid_i = deviceGrids(instance);
+
+            grid_i.rebuild_variance_views(V_0, 5.0, 5.0/500, team);
             
             bounds_d(instance).initialize(grid_i, team);
             auto bounds = bounds_d(instance);
@@ -287,16 +296,18 @@ void compute_jacobian(
             
             // Get indices for price extraction
             const int index_s = price_indices(instance, 0);
-            const int index_v = price_indices(instance, 1);
+            const int index_v = grid_i.find_v0_index(V_0);
 
             // Now you can use these indices directly
             const double base_price = U_i(index_s + index_v*(m1+1));
             base_prices(instance) = base_price;
 
             //FD approx of the parameters
+            /*
             for(int param = 0; param < 5; param++) {
                 // Special handling for V0 (param == 4)
                if(param == 4) {  // V0 perturbation
+                    
                     const int lower_idx = v0_interp_data(instance, 0);
                     const int upper_idx = v0_interp_data(instance, 1);
                     const double weight = v0_interp_data(instance, 2);
@@ -308,6 +319,8 @@ void compute_jacobian(
                     // Interpolate price at perturbed V0
                     const double pert_price = price_lower + weight * (price_upper - price_lower);
                     J(instance, param) = (pert_price - base_price) / eps;
+                    
+                   
                 }
                 else {
                     // Handle other parameters as before
@@ -348,10 +361,11 @@ void compute_jacobian(
                     J(instance, param) = (pert_price - base_price) / eps;
                 }
             }
-
+            */
+            
             // Loop over parameters for finite differences, this excludes v0 in the loop and treats it seperately
             //same result of course but surprisingly not a whole lot faster
-            /*
+            
             for(int param = 0; param < 4; param++) {
                 // Handle other parameters as before
                 double kappa_p = kappa;
@@ -388,24 +402,40 @@ void compute_jacobian(
 
                 // Store results
                 double pert_price = U_i(index_s + index_v*(m1+1));
-                pert_prices(instance, param) = pert_price;
+                //pert_prices(instance, param) = pert_price;
                 J(instance, param) = (pert_price - base_price) / eps;
             }
             // Special handling for V0 (param == 4)
             const int param = 4;
-            const int lower_idx = v0_interp_data(instance, 0);
-            const int upper_idx = v0_interp_data(instance, 1);
-            const double weight = v0_interp_data(instance, 2);
+            for(int idx = 0; idx < total_size; idx++) {
+                U_i(idx) = U_0_i(idx);
+            }
+
+            // Rebuild variance views with perturbed V0
+            //This will change the V direction views for everyone!
+            grid_i.rebuild_variance_views(V_0 + eps, 5.0, 5.0/500, team);
+            //new v index for option price
+            const int index_v_pertubed = grid_i.find_v0_index(V_0 + eps);
             
-            // Get prices at S_0 for both variance levels
-            const double price_lower = U_i(index_s + lower_idx*(m1+1));
-            const double price_upper = U_i(index_s + upper_idx*(m1+1));
-            
-            // Interpolate price at perturbed V0
-            const double pert_price = price_lower + weight * (price_upper - price_lower);
-            pert_prices(instance, param) = pert_price;
+            // Rebuild matrices with updated grid
+            A0_solvers(instance).build_matrix(grid_i, rho, sigma, team);
+            A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+            A2_solvers(instance).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
+
+            // Recompute solution
+            // Compute perturbed solution
+            device_DO_timestepping<Device, decltype(U_i)>(
+                m1, m2, N, delta_t, theta, r_f,
+                A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
+                bounds, U_i, Y_0_i, Y_1_i,
+                A0_result_i, A1_result_i, A2_result_unshuf_i,
+                U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
+                team
+            );
+
+            // Get price and compute gradient
+            double pert_price = U_i(index_s + index_v_pertubed*(m1+1));
             J(instance, param) = (pert_price - base_price) / eps;
-            */
         });
         Kokkos::fence();
 }
@@ -437,7 +467,7 @@ void test_jacobian_method(){
     const double theta = 0.8;
     const double delta_t = T/N;
 
-    const double eps = 1e-6;  // Perturbation size, should be Order of the error we are making in the Option computation
+    const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
     const int num_strikes = 5;
@@ -453,6 +483,15 @@ void test_jacobian_method(){
     std::cout << "Total PDE solves: " << num_strikes * 6 << std::endl;
     std::cout << "Base parameters: kappa=" << kappa << ", eta=" << eta 
               << ", sigma=" << sigma << ", rho=" << rho << ", V_0=" << V_0 << "\n";
+
+    Kokkos::View<double*> market_prices("market_prices", num_strikes);
+    auto h_market_prices = Kokkos::create_mirror_view(market_prices);
+
+    // Compute market prices on host using Black-Scholes
+    // Generate synthetic market prices
+    generate_market_data(S_0, T, r_d, strikes, h_market_prices);
+    Kokkos::deep_copy(market_prices, h_market_prices);
+
 
     // Create solver arrays for each strike
     Kokkos::View<Device_A0_heston<Device>*> A0_solvers("A0_solvers", num_strikes);
@@ -491,6 +530,8 @@ void test_jacobian_method(){
         auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
         auto h_Delta_v = Kokkos::create_mirror_view(hostGrids[i].device_Delta_v);
 
+        //if we change something here we need to change it also inside the gradient method!
+        //v0 grid views are rebuild there curretnly with 5.0, V_0+eps, 5.0/500
         Grid tempGrid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
         
         for(int j = 0; j <= m1; j++) h_Vec_s(j) = tempGrid.Vec_s[j];
@@ -544,7 +585,7 @@ void test_jacobian_method(){
     
     // Get indices for price extraction
     // Before your main computation, create a view for storing indices
-    Kokkos::View<int**> price_indices("price_indices", num_strikes, 2);  // [num_strikes][2] for s and v indices
+    Kokkos::View<int**> price_indices("price_indices", num_strikes, 1);  // [num_strikes][1] for s 
     auto h_price_indices = Kokkos::create_mirror_view(price_indices);
 
     // Compute indices on host for price extraction
@@ -563,53 +604,10 @@ void test_jacobian_method(){
                 break;
             }
         }
-        
-        // Find v index
-        for(int i = 0; i <= m2; i++) {
-            if(std::abs(h_Vec_v(i) - V_0) < 1e-10) {
-                h_price_indices(strike_idx, 1) = i;  // Store v index
-                break;
-            }
-        }
     }
     
     // Copy indices to device
     Kokkos::deep_copy(price_indices, h_price_indices);  
-
-    // Create a view for V0 interpolation data [num_strikes][4]:
-    // [0]: lower_idx
-    // [1]: upper_idx
-    // [2]: interpolation weight
-    // [3]: (v_upper - v_lower) for validation
-    Kokkos::View<double**> v0_interp_data("v0_interp_data", num_strikes, 4);
-    auto h_v0_interp_data = Kokkos::create_mirror_view(v0_interp_data);
-
-    // Compute interpolation data on host
-    const double v0_pert = V_0 + eps;
-    for(int strike_idx = 0; strike_idx < num_strikes; ++strike_idx) {
-        auto grid = hostGrids[strike_idx];
-        auto h_Vec_v = Kokkos::create_mirror_view(grid.device_Vec_v);
-        Kokkos::deep_copy(h_Vec_v, grid.device_Vec_v);
-        
-        // Find bracketing points
-        for(int i = 0; i < m2; i++) {
-            if(h_Vec_v(i) <= v0_pert && v0_pert <= h_Vec_v(i+1)) {
-                // Store indices
-                h_v0_interp_data(strike_idx, 0) = i;          // lower_idx
-                h_v0_interp_data(strike_idx, 1) = i + 1;      // upper_idx
-                
-                // Compute and store interpolation weight
-                double v_lower = h_Vec_v(i);
-                double v_upper = h_Vec_v(i+1);
-                h_v0_interp_data(strike_idx, 2) = (v0_pert - v_lower) / (v_upper - v_lower);  // weight
-                h_v0_interp_data(strike_idx, 3) = v_upper - v_lower;  // store difference for validation
-                break;
-            }
-        }
-    }
-
-    // Copy to device
-    Kokkos::deep_copy(v0_interp_data, h_v0_interp_data);
 
     // First compute base prices
     auto t_start = timer::now();
@@ -627,7 +625,7 @@ void test_jacobian_method(){
         bounds_d, deviceGrids,
         U_0, workspace,
         // Price extraction and interpolation data
-        price_indices, v0_interp_data,
+        price_indices,
         // Output matrix
         J, base_prices,
         // Perturbation size (optional)
@@ -641,19 +639,6 @@ void test_jacobian_method(){
 
     Kokkos::View<double*> residuals("residuals", num_strikes);
     Kokkos::View<double*> delta("delta", 5);
-
-    Kokkos::View<double*> market_prices("market_prices", num_strikes);
-    auto h_market_prices = Kokkos::create_mirror_view(market_prices);
-
-    // Compute market prices on host using Black-Scholes
-    // Generate synthetic market prices
-    generate_market_data(S_0, T, r_d, strikes, h_market_prices);
-
-    Kokkos::deep_copy(market_prices, h_market_prices);
-
-    // Copy base_prices to host for printing
-    auto h_base_prices = Kokkos::create_mirror_view(base_prices);
-    Kokkos::deep_copy(h_base_prices, base_prices);
 
     // Compute residuals on device
     Kokkos::parallel_for("compute_residuals", num_strikes, 
@@ -678,8 +663,13 @@ void test_jacobian_method(){
     double new_rho = rho + h_delta(3);
     double new_v0 = V_0 + h_delta(4);
 
+
+    // Copy base_prices to host for printing
+    auto h_base_prices = Kokkos::create_mirror_view(base_prices);
+    Kokkos::deep_copy(h_base_prices, base_prices);
     
     // Print results
+    /*
     std::cout << "\nCalibration Results:\n";
     std::cout << "==================\n";
     std::cout << std::fixed << std::setprecision(6);
@@ -715,24 +705,6 @@ void test_jacobian_method(){
     total_error = std::sqrt(total_error);
     
     std::cout << "\nTotal RMS Error: " << total_error << "\n";
-
-
-    /*
-    Kokkos::deep_copy(residuals, 1.0);
-
-    // 4) Now call your on-device parameter update with a chosen lambda
-    double lambda = 0.1;
-    compute_parameter_update_on_device(J, residuals, lambda, delta);
-
-    // 5) delta (size 5) now contains the solution (the LM update).
-    //    If you need to access or print it on the host, do:
-    auto delta_host = Kokkos::create_mirror_view(delta);
-    Kokkos::deep_copy(delta_host, delta);
-    std::cout << "Delta: ";
-    for(int i = 0; i < 5; i++){
-        std::cout << delta_host(i) << " ";
-    }
-    std::cout << std::endl;
     */
 
     auto t_end_second = timer::now();
@@ -741,7 +713,7 @@ void test_jacobian_method(){
               << " seconds" << std::endl;
     
     // Print Jacobian matrix
-    /*
+    
     auto h_J = Kokkos::create_mirror_view(J);
     Kokkos::deep_copy(h_J, J);
     
@@ -774,14 +746,325 @@ void test_jacobian_method(){
         }
         std::cout << "\n";
     }
-    */
+    
+}
+
+
+void test_basic_calibration(){
+    using Device = Kokkos::DefaultExecutionSpace;
+    using timer = std::chrono::high_resolution_clock;
+
+    const int max_iter = 10;
+    const double tol = 0.0015;
+
+    // Market parameters
+    const double S_0 = 100.0;
+    const double V_0 = 0.04;
+    const double T = 1.0;
+
+    const double r_d = 0.025;
+    const double r_f = 0.0;
+
+    // Current parameter set
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double kappa = 1.5;
+    const double eta = 0.04;
+    
+    // Numerical parameters
+    const int m1 = 50;
+    const int m2 = 25;
+
+    const int N = 20;
+    const double theta = 0.8;
+    const double delta_t = T/N;
+
+    const double eps = 1e-6;  // Perturbation size
+
+    // Setup strikes and market data
+    const int num_strikes = 5;
+    std::vector<double> strikes(num_strikes);
+    std::cout << "Strikes: ";
+    for(int i = 0; i < num_strikes; ++i) {
+        strikes[i] = 90.0 + i;  // Strikes
+        std::cout << strikes[i] << ", ";
+    }
+    std::cout << "" << std::endl;
+
+    std::cout << "Computing Jacobian for " << num_strikes << " strikes\n";
+    std::cout << "Total PDE solves: " << num_strikes * 6 << std::endl;
+    std::cout << "Base parameters: kappa=" << kappa << ", eta=" << eta 
+              << ", sigma=" << sigma << ", rho=" << rho << ", V_0=" << V_0 << "\n";
+
+    Kokkos::View<double*> market_prices("market_prices", num_strikes);
+    auto h_market_prices = Kokkos::create_mirror_view(market_prices);
+
+    // Compute market prices on host using Black-Scholes
+    // Generate synthetic market prices
+    generate_market_data(S_0, T, r_d, strikes, h_market_prices);
+    Kokkos::deep_copy(market_prices, h_market_prices);
+
+
+    // Create solver arrays for each strike
+    Kokkos::View<Device_A0_heston<Device>*> A0_solvers("A0_solvers", num_strikes);
+    Kokkos::View<Device_A1_heston<Device>*> A1_solvers("A1_solvers", num_strikes);
+    Kokkos::View<Device_A2_shuffled_heston<Device>*> A2_solvers("A2_solvers", num_strikes);
+    
+    // Initialize solvers
+    auto h_A0 = Kokkos::create_mirror_view(A0_solvers);
+    auto h_A1 = Kokkos::create_mirror_view(A1_solvers);
+    auto h_A2 = Kokkos::create_mirror_view(A2_solvers);
+    
+    for(int i = 0; i < num_strikes; i++) {
+        h_A0(i) = Device_A0_heston<Device>(m1, m2);
+        h_A1(i) = Device_A1_heston<Device>(m1, m2);
+        h_A2(i) = Device_A2_shuffled_heston<Device>(m1, m2);
+    }
+    Kokkos::deep_copy(A0_solvers, h_A0);
+    Kokkos::deep_copy(A1_solvers, h_A1);
+    Kokkos::deep_copy(A2_solvers, h_A2);
+
+    // Create boundary conditions array
+    Kokkos::View<Device_BoundaryConditions<Device>*> bounds_d("bounds_d", num_strikes);
+    auto h_bounds = Kokkos::create_mirror_view(bounds_d);
+    for(int i = 0; i < num_strikes; ++i) {
+        h_bounds(i) = Device_BoundaryConditions<Device>(m1, m2, r_d, r_f, N, delta_t);
+    }
+    Kokkos::deep_copy(bounds_d, h_bounds);
+
+    // Initialize grid views
+    std::vector<GridViews> hostGrids;
+    buildMultipleGridViews(hostGrids, num_strikes, m1, m2);
+    for(int i = 0; i < num_strikes; ++i) {
+        double K = strikes[i];
+        auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[i].device_Vec_s);
+        auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[i].device_Vec_v);
+        auto h_Delta_s = Kokkos::create_mirror_view(hostGrids[i].device_Delta_s);
+        auto h_Delta_v = Kokkos::create_mirror_view(hostGrids[i].device_Delta_v);
+
+        //if we change something here we need to change it also inside the gradient method!
+        //v0 grid views are rebuild there curretnly with 5.0, V_0+eps, 5.0/500
+        Grid tempGrid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+        
+        for(int j = 0; j <= m1; j++) h_Vec_s(j) = tempGrid.Vec_s[j];
+        for(int j = 0; j <= m2; j++) h_Vec_v(j) = tempGrid.Vec_v[j];
+        for(int j = 0; j < m1; j++) h_Delta_s(j) = tempGrid.Delta_s[j];
+        for(int j = 0; j < m2; j++) h_Delta_v(j) = tempGrid.Delta_v[j];
+
+        Kokkos::deep_copy(hostGrids[i].device_Vec_s, h_Vec_s);
+        Kokkos::deep_copy(hostGrids[i].device_Vec_v, h_Vec_v);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_s, h_Delta_s);
+        Kokkos::deep_copy(hostGrids[i].device_Delta_v, h_Delta_v);
+    }
+
+    Kokkos::View<GridViews*> deviceGrids("deviceGrids", num_strikes);
+    auto h_deviceGrids = Kokkos::create_mirror_view(deviceGrids);
+    for(int i = 0; i < num_strikes; ++i) h_deviceGrids(i) = hostGrids[i];
+    Kokkos::deep_copy(deviceGrids, h_deviceGrids);
+
+    const int total_size = (m1+1)*(m2+1);
+    
+    // Create workspace
+    DO_Workspace<Device> workspace(num_strikes, total_size);
+
+    // Initialize initial conditions U_0
+    Kokkos::View<double**> U_0("U_0", num_strikes, total_size);
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+
+    // Fill initial conditions on host
+    for(int inst = 0; inst < num_strikes; ++inst) {
+        auto grid = hostGrids[inst];
+        auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
+        Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
+        double K = strikes[inst];
+        
+        for(int j = 0; j <= m2; j++) {
+            for(int i = 0; i <= m1; i++) {
+                h_U_0(inst, i + j*(m1+1)) = std::max(h_Vec_s(i) - K, 0.0);
+            }
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+    Kokkos::deep_copy(workspace.U, U_0);  // Copy initial condition to workspace
+
+    // Storage for Jacobian matrix
+    Kokkos::View<double**> J("Jacobian", num_strikes, 5);
+    
+    // Storage for base and perturbed prices
+    Kokkos::View<double*> base_prices("base_prices", num_strikes);
+    Kokkos::View<double**> pert_prices("pert_prices", num_strikes, 5);
+
+    
+    // Get indices for price extraction
+    // Before your main computation, create a view for storing indices
+    Kokkos::View<int**> price_indices("price_indices", num_strikes, 1);  // [num_strikes][1] for s 
+    auto h_price_indices = Kokkos::create_mirror_view(price_indices);
+
+    // Compute indices on host for price extraction
+    for(int strike_idx = 0; strike_idx < num_strikes; ++strike_idx) {
+        auto grid = hostGrids[strike_idx];
+        auto h_Vec_s = Kokkos::create_mirror_view(grid.device_Vec_s);
+        auto h_Vec_v = Kokkos::create_mirror_view(grid.device_Vec_v);
+        
+        Kokkos::deep_copy(h_Vec_s, grid.device_Vec_s);
+        Kokkos::deep_copy(h_Vec_v, grid.device_Vec_v);
+        
+        // Find s index
+        for(int i = 0; i <= m1; i++) {
+            if(std::abs(h_Vec_s(i) - S_0) < 1e-10) {
+                h_price_indices(strike_idx, 0) = i;  // Store s index
+                break;
+            }
+        }
+    }
+    
+    // Copy indices to device
+    Kokkos::deep_copy(price_indices, h_price_indices);  
+
+    // First compute base prices
+    auto t_start = timer::now();
+
+    // Create views for tracking errors
+    Kokkos::View<double*> current_residuals("current_residuals", num_strikes);
+    Kokkos::View<double*> new_residuals("new_residuals", num_strikes);
+    Kokkos::View<double*> delta("delta", 5);
+
+    // Current parameters that will be updated
+    double current_kappa = kappa;
+    double current_eta = eta;
+    double current_sigma = sigma;
+    double current_rho = rho;
+    double current_v0 = V_0;
+
+    double lambda = 0.1; // Initial LM parameter
+    bool converged = false;
+
+    // Main iteration loop
+    for(int iter = 0; iter < max_iter && !converged; iter++) {
+        auto iter_start = timer::now();
+        std::cout << "\nIteration " << iter + 1 << " of " << max_iter << std::endl;
+        std::cout << "Current parameters: κ=" << current_kappa 
+                << ", η=" << current_eta 
+                << ", σ=" << current_sigma 
+                << ", ρ=" << current_rho 
+                << ", v₀=" << current_v0 << std::endl;
+
+        // Compute Jacobian and base prices with current parameters
+        compute_jacobian(
+            S_0, current_v0, T,
+            r_d, r_f,
+            current_rho, current_sigma, current_kappa, current_eta,
+            m1, m2, total_size, N, theta, delta_t,
+            num_strikes,
+            A0_solvers, A1_solvers, A2_solvers,
+            bounds_d, deviceGrids,
+            U_0, workspace,
+            price_indices,
+            J, base_prices,
+            eps
+        );
+
+        // Compute current residuals
+        Kokkos::parallel_for("compute_residuals", num_strikes, 
+            KOKKOS_LAMBDA(const int i) {
+                current_residuals(i) = market_prices(i) - base_prices(i);
+        });
+        Kokkos::fence();
+
+        // Compute parameter update
+        compute_parameter_update_on_device(J, current_residuals, lambda, delta);
+
+        // Get delta on host
+        auto h_delta = Kokkos::create_mirror_view(delta);
+        Kokkos::deep_copy(h_delta, delta);
+
+        // Try new parameters
+        double new_kappa = current_kappa + h_delta(0);
+        double new_eta = current_eta + h_delta(1);
+        double new_sigma = current_sigma + h_delta(2);
+        double new_rho = current_rho + h_delta(3);
+        double new_v0 = current_v0 + h_delta(4);
+
+        // Compute new prices with updated parameters
+        Kokkos::deep_copy(workspace.U, U_0); //donno if this is needed
+        //we will need to rebuild the Vec_v Views here as well!
+        std::cout<< "rebuild V0 here" << std::endl;
+        parallel_DO_solve(
+        num_strikes, S_0, V_0, m1, m2, N, T, delta_t, theta,
+        r_d, r_f, new_rho, new_sigma, new_kappa, new_eta,
+        A0_solvers, A1_solvers, A2_solvers,
+        bounds_d, deviceGrids,
+        workspace, base_prices);
+
+        // Compute new residuals
+        Kokkos::parallel_for("compute_new_residuals", num_strikes, 
+            KOKKOS_LAMBDA(const int i) {
+                new_residuals(i) = market_prices(i) - base_prices(i);
+        });
+        Kokkos::fence();
+
+        // Compute error norms
+        double current_error = 0.0;
+        double new_error = 0.0;
+        auto h_current_residuals = Kokkos::create_mirror_view(current_residuals);
+        auto h_new_residuals = Kokkos::create_mirror_view(new_residuals);
+        Kokkos::deep_copy(h_current_residuals, current_residuals);
+        Kokkos::deep_copy(h_new_residuals, new_residuals);
+
+        for(int i = 0; i < num_strikes; i++) {
+            current_error += h_current_residuals(i) * h_current_residuals(i);
+            new_error += h_new_residuals(i) * h_new_residuals(i);
+        }
+
+        std::cout << "Current error: " << std::sqrt(current_error) << std::endl;
+        std::cout << "New error: " << std::sqrt(new_error) << std::endl;
+
+        // Update parameters based on error improvement
+        if(new_error < current_error) {
+            current_kappa = new_kappa;
+            current_eta = new_eta;
+            current_sigma = new_sigma;
+            current_rho = new_rho;
+            current_v0 = new_v0;
+            lambda = std::max(lambda / 10.0, 1e-7);  // Decrease lambda but not too small
+            
+            // Check convergence
+            if(std::sqrt(new_error) < tol || 
+            (std::abs(std::sqrt(new_error) - std::sqrt(current_error)) < tol)) {
+                converged = true;
+                std::cout << "Converged!" << std::endl;
+            }
+        } else {
+            lambda = std::min(lambda * 10.0, 1e7);  // Increase lambda but not too large
+        }
+
+        auto iter_end = timer::now();
+        std::cout << "Iteration time: "
+                << std::chrono::duration<double>(iter_end - iter_start).count()
+                << " seconds" << std::endl;
+    }
+
+    // Print final results
+    std::cout << "\nFinal calibrated parameters:" << std::endl;
+    std::cout << "κ = " << current_kappa << std::endl;
+    std::cout << "η = " << current_eta << std::endl;
+    std::cout << "σ = " << current_sigma << std::endl;
+    std::cout << "ρ = " << current_rho << std::endl;
+    std::cout << "v₀ = " << current_v0 << std::endl;
+
+    auto t_end_second = timer::now();
+    std::cout << "Total time after Updating parameters: "
+              << std::chrono::duration<double>(t_end_second - t_start).count()
+              << " seconds" << std::endl;
+    
 }
 
 
 void test_heston_calibration(){
   Kokkos::initialize();
   {
-    test_jacobian_method();
+    //test_jacobian_method();
+    test_basic_calibration();
   }
   Kokkos::finalize();
  

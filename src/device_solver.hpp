@@ -53,6 +53,8 @@ template<class Device>
 void parallel_DO_solve(
     // Grid dimensions
     const int nInstances,
+    const int S_0,
+    const int V_0,
     const int m1,
     const int m2,
     // Time discretization
@@ -73,7 +75,8 @@ void parallel_DO_solve(
     const Kokkos::View<Device_A2_shuffled_heston<Device>*>& A2_solvers,
     const Kokkos::View<Device_BoundaryConditions<Device>*>& bounds_d,
     const Kokkos::View<GridViews*>& deviceGrids,
-    DO_Workspace<Device>& workspace) {  // Now just pass the workspace
+    DO_Workspace<Device>& workspace,
+    Kokkos::View<double*>& base_prices) {  // Now just pass the workspace
 
     const int total_size = (m1+1)*(m2+1);
 
@@ -99,6 +102,10 @@ void parallel_DO_solve(
 
             //Inits Grid views
             GridViews grid_i = deviceGrids(instance);
+
+            //grid_i.rebuild_variance_views(V_0, 5.0, 5.0/500, team);
+
+
             // Initialize boundaries AFTER the Grids are initilized 
             bounds_d(instance).initialize(grid_i, team);
             auto bounds = bounds_d(instance);
@@ -153,6 +160,27 @@ void parallel_DO_solve(
                 A2_solvers(instance).solve_implicit_parallel_s(U_next_shuffled_i, Y_1_shuffled_i, team);
                 device_unshuffle_vector(U_next_shuffled_i, U_i, m1, m2, team);
             }
+            
+            // Find s index
+            int index_s = -1;
+            int index_v = -1;
+            for(int i = 0; i <= m1; i++) {
+                if(Kokkos::abs(grid_i.device_Vec_s(i) - S_0) < 1e-10) {
+                    index_s = i;  // Store s index
+                    break;
+                }
+            }
+
+            for(int i = 0; i <= m2; i++) {
+                if(Kokkos::abs(grid_i.device_Vec_v(i) - V_0) < 1e-10) {
+                    index_v = i;  // Store s index
+                    break;
+                }
+            }
+
+            // Now you can use these indices directly
+            const double base_price = U_i(index_s + index_v*(m1+1));
+            base_prices(instance) = base_price;
     });
     Kokkos::fence();
 }
