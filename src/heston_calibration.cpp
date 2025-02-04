@@ -453,6 +453,89 @@ void compute_jacobian(
 }
 
 
+// Function to compute Jacobian matrix
+void compute_base_prices(
+    // Market/model parameters
+    const double S_0, const double V_0, const double T,
+    const double r_d, const double r_f,
+    const double rho, const double sigma, const double kappa, const double eta,
+    // Numerical parameters
+    const int m1, const int m2, const int total_size, const int N, const double theta, const double delta_t,
+    // Pre-computed data structures
+    const int num_strikes,
+    const Kokkos::View<Device_A0_heston<Kokkos::DefaultExecutionSpace>*>& A0_solvers,
+    const Kokkos::View<Device_A1_heston<Kokkos::DefaultExecutionSpace>*>& A1_solvers,
+    const Kokkos::View<Device_A2_shuffled_heston<Kokkos::DefaultExecutionSpace>*>& A2_solvers,
+    const Kokkos::View<Device_BoundaryConditions<Kokkos::DefaultExecutionSpace>*>& bounds_d,
+    const Kokkos::View<GridViews*>& deviceGrids,
+    DO_Workspace<Kokkos::DefaultExecutionSpace>& workspace,
+    Kokkos::View<double*>& base_prices
+) {
+    using Device = Kokkos::DefaultExecutionSpace;
+    // Create team policy
+    using team_policy = Kokkos::TeamPolicy<>;
+    team_policy policy(num_strikes, Kokkos::AUTO);
+
+    // Main Jacobian computation kernel 
+    Kokkos::parallel_for("Base_Price_computation", policy,
+        KOKKOS_LAMBDA(const team_policy::member_type& team) {
+            const int instance = team.league_rank();
+            
+            // Setup workspace views
+            auto U_i = Kokkos::subview(workspace.U, instance, Kokkos::ALL);
+            auto Y_0_i = Kokkos::subview(workspace.Y_0, instance, Kokkos::ALL);
+            auto Y_1_i = Kokkos::subview(workspace.Y_1, instance, Kokkos::ALL);
+            auto A0_result_i = Kokkos::subview(workspace.A0_result, instance, Kokkos::ALL);
+            auto A1_result_i = Kokkos::subview(workspace.A1_result, instance, Kokkos::ALL);
+            auto A2_result_unshuf_i = Kokkos::subview(workspace.A2_result_unshuf, instance, Kokkos::ALL);
+            
+            auto U_shuffled_i = Kokkos::subview(workspace.U_shuffled, instance, Kokkos::ALL);
+            auto Y_1_shuffled_i = Kokkos::subview(workspace.Y_1_shuffled, instance, Kokkos::ALL);
+            auto A2_result_shuffled_i = Kokkos::subview(workspace.A2_result_shuffled, instance, Kokkos::ALL);
+            auto U_next_shuffled_i = Kokkos::subview(workspace.U_next_shuffled, instance, Kokkos::ALL);
+
+            GridViews grid_i = deviceGrids(instance);
+
+            grid_i.rebuild_variance_views(V_0, 5.0, 5.0/500, team);
+            
+            bounds_d(instance).initialize(grid_i, team);
+            auto bounds = bounds_d(instance);
+            
+            A0_solvers(instance).build_matrix(grid_i, rho, sigma, team);
+            A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+            A2_solvers(instance).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
+
+            device_DO_timestepping<Device, decltype(U_i)>(
+                m1, m2, N, delta_t, theta, r_f,
+                A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
+                bounds,
+                U_i, Y_0_i, Y_1_i,
+                A0_result_i, A1_result_i, A2_result_unshuf_i,
+                U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
+                team
+            );
+            
+            //The s direction can be precomputed
+            // Get indices for price extraction
+            // Find s index
+            int index_s = -1;
+            //int index_v = -1;
+            for(int i = 0; i <= m1; i++) {
+                if(Kokkos::abs(grid_i.device_Vec_s(i) - S_0) < 1e-10) {
+                    index_s = i;  // Store s index
+                    break;
+                }
+            }
+            const int index_v = grid_i.find_v0_index(V_0);
+
+            // Now you can use these indices directly
+            const double base_price = U_i(index_s + index_v*(m1+1));
+            base_prices(instance) = base_price;
+        });
+        Kokkos::fence();
+}
+
+
 void test_jacobian_method(){
     using Device = Kokkos::DefaultExecutionSpace;
     using timer = std::chrono::high_resolution_clock;
@@ -753,32 +836,32 @@ void test_basic_calibration(){
     const double r_f = 0.0;
 
     // Current parameter set
-    
+    /*
     const double rho = -0.9;
     const double sigma = 0.3;
     const double kappa = 1.5;
     const double eta = 0.04;
-    
-   
-   /*
-    const double rho = -0.7;
-    const double sigma = 0.8;
-    const double kappa = 0.3;
-    const double eta = 0.1;
     */
+   
+   
+    const double rho = -0.7;
+    const double sigma = 0.4;
+    const double kappa = 2.0;
+    const double eta = 0.1;
+    
     
     // Numerical parameters
     const int m1 = 50;
     const int m2 = 25;
 
-    const int N = 20;
+    const int N = 50;
     const double theta = 0.8;
     const double delta_t = T/N;
 
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 40;
+    const int num_strikes = 10;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
@@ -787,8 +870,8 @@ void test_basic_calibration(){
     }
     std::cout << "" << std::endl;
 
-    const int max_iter = 10;
-    const double tol = 0.01;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
+    const int max_iter = 20;
+    const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
 
 
@@ -1002,31 +1085,18 @@ void test_basic_calibration(){
 
         // Compute new prices with updated parameters
         Kokkos::deep_copy(workspace.U, U_0); //donno if this is needed
-        //Rebuilding is done inside, does not work yet tho
-        //also the wrong option prices are retuned in this method for some reason. The jacobian does it correctly
-        /*
-        parallel_DO_solve(
-        num_strikes, S_0, new_v0, m1, m2, N, T, delta_t, theta,
-        r_d, r_f, new_rho, new_sigma, new_kappa, new_eta,
-        A0_solvers, A1_solvers, A2_solvers,
-        bounds_d, deviceGrids,
-        workspace, base_prices);
-        */
-       //the parallel do method does not work for some reason. so we use the comput jacobain again but only to get the new base prices
-        compute_jacobian(
-                S_0, new_v0, T,
+        //Rebuilding is done inside
+        //need to check if correct option prices are computed here
+        compute_base_prices(S_0, new_v0, T,
                 r_d, r_f,
                 new_rho, new_sigma, new_kappa, new_eta,
                 m1, m2, total_size, N, theta, delta_t,
                 num_strikes,
                 A0_solvers, A1_solvers, A2_solvers,
                 bounds_d, deviceGrids,
-                U_0, workspace,
-                J, base_prices,
-                eps
+                workspace,
+                base_prices
             );
-        
-
         // Compute new residuals
         Kokkos::parallel_for("compute_new_residuals", num_strikes, 
             KOKKOS_LAMBDA(const int i) {
@@ -1060,10 +1130,11 @@ void test_basic_calibration(){
             lambda = std::max(lambda / 10.0, 1e-7);  // Decrease lambda but not too small
             
             // Check convergence
-            if(std::sqrt(new_error) < tol || 
-            (std::abs(std::sqrt(new_error) - std::sqrt(current_error)) < tol)) {
+            if(std::sqrt(new_error) < tol){ //|| 
+            //(std::abs(std::sqrt(new_error) - std::sqrt(current_error)) < tol)) {
                 converged = true;
                 std::cout << "Converged!" << std::endl;
+                final_error = std::sqrt(new_error);
             }
         } else {
             lambda = std::min(lambda * 10.0, 1e7);  // Increase lambda but not too large
@@ -1073,7 +1144,7 @@ void test_basic_calibration(){
         std::cout << "Iteration time: "
                 << std::chrono::duration<double>(iter_end - iter_start).count()
                 << " seconds" << std::endl;
-        final_error = std::sqrt(new_error);
+        final_error = min(std::sqrt(new_error),std::sqrt(current_error));
     }
 
     // Print final results
@@ -1083,6 +1154,7 @@ void test_basic_calibration(){
     std::cout << "σ = " << current_sigma << std::endl;
     std::cout << "ρ = " << current_rho << std::endl;
     std::cout << "v₀ = " << current_v0 << std::endl;
+    std::cout << "error = " << final_error << std::endl;
 
     auto t_end_second = timer::now();
     std::cout << "Total time after Updating parameters: "
