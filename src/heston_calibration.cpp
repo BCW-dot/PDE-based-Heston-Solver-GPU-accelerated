@@ -30,6 +30,7 @@ void generate_market_data(
 ) {
     // Fixed market volatility for synthetic data generation
     const double market_vol = 0.2;  
+    std::cout << "Volatility Black Scholes: " << market_vol << std::endl;
 
     // Generate market prices using Black-Scholes
     for(size_t i = 0; i < strikes.size(); ++i) {
@@ -151,7 +152,7 @@ void compute_parameter_update_on_device(
     KokkosBlas::gemm("T", "N", 1.0, J, J, 0.0, JTJ);
 
     // Print J^T J
-    /*
+    std::cout << std::fixed << std::setprecision(6);
     auto h_JTJ = Kokkos::create_mirror_view(JTJ);
     Kokkos::deep_copy(h_JTJ, JTJ);
     std::cout << "\nJ^T J matrix before lambda modification:\n";
@@ -161,7 +162,7 @@ void compute_parameter_update_on_device(
         }
         std::cout << "\n";
     }
-    */
+    
     
 
     // 2. Add lambda on diagonal
@@ -170,7 +171,6 @@ void compute_parameter_update_on_device(
     });
 
     // Print modified matrix
-    /*
     Kokkos::deep_copy(h_JTJ, JTJ);
     std::cout << "\nJ^T J matrix after lambda modification (lambda = " << lambda << "):\n";
     for(int i = 0; i < N; i++) {
@@ -179,37 +179,31 @@ void compute_parameter_update_on_device(
         }
         std::cout << "\n";
     }
-    */
 
     // 3. Build J^T r => [5]
     Kokkos::View<double*> JTr("JTr", N);
     KokkosBlas::gemv("T", 1.0, J, residual, 0.0, JTr);
 
     // Print J^T r
-    /*
     auto h_JTr = Kokkos::create_mirror_view(JTr);
     Kokkos::deep_copy(h_JTr, JTr);
     std::cout << "\nJ^T r vector:\n";
     for(int i = 0; i < N; i++) {
         std::cout << std::scientific << std::setw(15) << h_JTr(i) << "\n";
     }
-    */
 
     // 4. Solve (JTJ) * delta = (JTr) on device with our manual 5x5 routine
     solve_5x5_device(JTJ, JTr, delta);
 
     // Print solution (delta)
-    /*
     auto h_delta = Kokkos::create_mirror_view(delta);
     Kokkos::deep_copy(h_delta, delta);
     std::cout << "\nSolution delta:\n";
     for(int i = 0; i < N; i++) {
         std::cout << std::scientific << std::setw(15) << h_delta(i) << "\n";
     }
-    */
 
     // Optional: verify solution by computing residual JTJ * delta - JTr
-    /*
     Kokkos::View<double*> verify("verify", N);
     KokkosBlas::gemv("N", 1.0, JTJ, delta, 0.0, verify);
     auto h_verify = Kokkos::create_mirror_view(verify);
@@ -223,7 +217,6 @@ void compute_parameter_update_on_device(
     }
     res_norm = std::sqrt(res_norm);
     std::cout << "||JTJ * delta - JTr|| = " << std::scientific << res_norm << "\n";
-    */
 }
 
 
@@ -555,8 +548,8 @@ void test_jacobian_method(){
     const double eta = 0.04;
     
     // Numerical parameters
-    const int m1 = 50;
-    const int m2 = 25;
+    const int m1 = 25;
+    const int m2 = 20;
 
     const int N = 20;
     const double theta = 0.8;
@@ -569,7 +562,7 @@ void test_jacobian_method(){
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = 100.0 + i;  // Strikes
+        strikes[i] = 90.0 + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -703,6 +696,9 @@ void test_jacobian_method(){
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
 
+
+    //just a t
+    /*
     Kokkos::View<double*> residuals("residuals", num_strikes);
     Kokkos::View<double*> delta("delta", 5);
 
@@ -728,55 +724,26 @@ void test_jacobian_method(){
     double new_sigma = sigma + h_delta(2);
     double new_rho = rho + h_delta(3);
     double new_v0 = V_0 + h_delta(4);
-
+    */
 
     // Copy base_prices to host for printing
     auto h_base_prices = Kokkos::create_mirror_view(base_prices);
     Kokkos::deep_copy(h_base_prices, base_prices);
     
     // Print results
-    /*
     std::cout << "\nCalibration Results:\n";
     std::cout << "==================\n";
-    std::cout << std::fixed << std::setprecision(6);
-    
-    // Print initial parameters
-    std::cout << "\nInitial Parameters:\n";
-    std::cout << "κ = " << kappa << ", η = " << eta << ", σ = " << sigma 
-              << ", ρ = " << rho << ", v₀ = " << V_0 << "\n";
-    
-    // Print updated parameters
-    std::cout << "\nUpdated Parameters:\n";
-    std::cout << "κ = " << new_kappa << ", η = " << new_eta << ", σ = " << new_sigma 
-              << ", ρ = " << new_rho << ", v₀ = " << new_v0 << "\n";
     
     // Print some price comparisons
     std::cout << "\nPrice Comparisons (first 5 strikes):\n";
     std::cout << "Strike    Market    Model     Residual\n";
     std::cout << "----------------------------------------\n";
     for(int i = 0; i < std::min(5, num_strikes); i++) {
-        std::cout << std::setw(8) << strikes[i] 
-                  << std::setw(10) << h_market_prices(i)
-                  << std::setw(10) << h_base_prices(i)
-                  << std::setw(10) << h_base_prices(i) - h_market_prices(i)
+        std::cout << std::setw(8) << std::setprecision(3) << strikes[i] 
+                  << std::setw(10 + 12) << std::setprecision(16) << h_market_prices(i)
+                  << std::setw(10 + 12) << std::setprecision(16) << h_base_prices(i)
                   << "\n";
     }
-    
-    // Calculate total error
-    double total_error = 0.0;
-    for(int i = 0; i < num_strikes; i++) {
-        double diff = h_base_prices(i) - h_market_prices(i);
-        total_error += diff * diff;
-    }
-    total_error = std::sqrt(total_error);
-    
-    std::cout << "\nTotal RMS Error: " << total_error << "\n";
-    */
-
-    auto t_end_second = timer::now();
-    std::cout << "Total time after Updating parameters: "
-              << std::chrono::duration<double>(t_end_second - t_start).count()
-              << " seconds" << std::endl;
     
     // Print Jacobian matrix
     
@@ -812,13 +779,6 @@ void test_jacobian_method(){
         }
         std::cout << "\n";
     }
-
-    for(int inst = 0; inst < num_strikes; ++inst) {
-        std::cout << "Instance " << inst 
-                  << " Strike " << std::setprecision(2) << strikes[inst] 
-                << ": base price index comp Price = " << std::setprecision(16) << h_base_prices(inst) << "\n";
-                //<< ", Relative Error = " << rel_error << "\n";
-    }
     
 }
 
@@ -836,41 +796,41 @@ void test_basic_calibration(){
     const double r_f = 0.0;
 
     // Current parameter set
-    /*
+    
     const double rho = -0.9;
     const double sigma = 0.3;
-    const double kappa = 1.5;
-    const double eta = 0.04;
-    */
-   
-   
-    const double rho = -0.7;
-    const double sigma = 0.4;
-    const double kappa = 2.0;
-    const double eta = 0.1;
+    const double kappa = 2.5;
+    const double eta = 0.07;
     
+   
+   /*
+    const double rho = -0.3;
+    const double sigma = 0.2;
+    const double kappa = 3.0;
+    const double eta = 0.1;
+    */
     
     // Numerical parameters
-    const int m1 = 50;
-    const int m2 = 25;
+    const int m1 = 25;
+    const int m2 = 20;
 
-    const int N = 50;
+    const int N = 20;
     const double theta = 0.8;
     const double delta_t = T/N;
 
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 10;
+    const int num_strikes = 5;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * (0.3 + i * 0.05); //S_0 - num_strikes + i;//90.0 + i;  // Strikes
+        strikes[i] = 90.0 + i;//S_0 * (0.3 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
-    const int max_iter = 20;
+    const int max_iter = 5;
     const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
 
@@ -994,10 +954,10 @@ void test_basic_calibration(){
     double current_rho = rho;
     double current_v0 = V_0;
 
-    double lambda = 0.1; // Initial LM parameter
+    double lambda = 0.01; // Initial LM parameter
     bool converged = false;
 
-    int final_error = 100;
+    double final_error = 100; //
 
     // Main iteration loop
     for(int iter = 0; iter < max_iter && !converged; iter++) {
@@ -1026,7 +986,6 @@ void test_basic_calibration(){
         );
 
         //printing Jacobian
-        /*
         auto h_J = Kokkos::create_mirror_view(J);
         Kokkos::deep_copy(h_J, J);
         
@@ -1059,9 +1018,10 @@ void test_basic_calibration(){
             }
             std::cout << "\n";
         }
-        */
-        
 
+
+        
+        //base prices are already computed in compute_jacobian and stored in base_price
         // Compute current residuals
         Kokkos::parallel_for("compute_residuals", num_strikes, 
             KOKKOS_LAMBDA(const int i) {
@@ -1083,6 +1043,52 @@ void test_basic_calibration(){
         double new_rho = current_rho + h_delta(3);
         double new_v0 = current_v0 + h_delta(4);
 
+        //print the new params
+        std::cout << std::fixed << std::setprecision(6);
+        std::vector<double> new_params = {new_kappa, new_eta, new_sigma, new_rho, new_v0};
+        std::cout << "The new parameters: ";
+        for(int i =0; i< new_params.size(); i++){
+            std::cout << new_params[i] << ", ";
+        }
+        std::cout << "\n";
+
+        // Compute delta norm (matching np.linalg.norm(delta))
+        double delta_norm = 0.0;
+        for(int i = 0; i < 5; ++i) {
+            delta_norm += h_delta(i) * h_delta(i);
+        }
+        delta_norm = std::sqrt(delta_norm);
+
+        //computing current error
+        double current_error = 0;
+        auto h_current_residuals = Kokkos::create_mirror_view(current_residuals);
+        Kokkos::deep_copy(h_current_residuals, current_residuals);
+
+        for(int i = 0; i < num_strikes; i++) {
+            current_error += h_current_residuals(i) * h_current_residuals(i);
+        }
+        std::cout << "Current error: " << std::sqrt(current_error) << std::endl;
+
+        // Check convergence
+        if(delta_norm < tol ||   
+        (current_error < tol)) {
+            converged = true;
+            std::cout << "Converged!" << std::endl;
+            std::cout << "Error Toleranze: " << tol << std::endl;
+            std::cout << "Converged Error: " << current_error << std::endl;
+            std::cout << "Converged Delta Norm: " << delta_norm << std::endl;
+
+            // Update parameters to final values (matching params = new_params)
+            current_kappa = new_kappa;
+            current_eta = new_eta;
+            current_sigma = new_sigma;
+            current_rho = new_rho;
+            current_v0 = new_v0;
+
+            final_error = std::sqrt(current_error);
+            break; // Exit the loop
+        }
+
         // Compute new prices with updated parameters
         Kokkos::deep_copy(workspace.U, U_0); //donno if this is needed
         //Rebuilding is done inside
@@ -1097,6 +1103,17 @@ void test_basic_calibration(){
                 workspace,
                 base_prices
             );
+
+        //print the new base prices
+        std::cout << std::fixed << std::setprecision(12);
+        auto h_base_prices   = Kokkos::create_mirror_view(base_prices);
+        Kokkos::deep_copy(h_base_prices,   base_prices);
+        std::cout << "The new base prices: ";
+        for(int i =0; i< num_strikes; i++){
+            std::cout << h_base_prices(i) << ", ";
+        }
+        std::cout << "\n";
+
         // Compute new residuals
         Kokkos::parallel_for("compute_new_residuals", num_strikes, 
             KOKKOS_LAMBDA(const int i) {
@@ -1104,21 +1121,18 @@ void test_basic_calibration(){
         });
         Kokkos::fence();
 
-        // Compute error norms
-        double current_error = 0.0;
+        // Compute new error norms
         double new_error = 0.0;
-        auto h_current_residuals = Kokkos::create_mirror_view(current_residuals);
         auto h_new_residuals = Kokkos::create_mirror_view(new_residuals);
-        Kokkos::deep_copy(h_current_residuals, current_residuals);
         Kokkos::deep_copy(h_new_residuals, new_residuals);
 
         for(int i = 0; i < num_strikes; i++) {
-            current_error += h_current_residuals(i) * h_current_residuals(i);
             new_error += h_new_residuals(i) * h_new_residuals(i);
         }
 
-        std::cout << "Current error: " << std::sqrt(current_error) << std::endl;
+        //std::cout << "Current error: " << std::sqrt(current_error) << std::endl;
         std::cout << "New error: " << std::sqrt(new_error) << std::endl;
+        
 
         // Update parameters based on error improvement
         if(new_error < current_error) {
@@ -1128,22 +1142,15 @@ void test_basic_calibration(){
             current_rho = new_rho;
             current_v0 = new_v0;
             lambda = std::max(lambda / 10.0, 1e-7);  // Decrease lambda but not too small
-            
-            // Check convergence
-            if(std::sqrt(new_error) < tol){ //|| 
-            //(std::abs(std::sqrt(new_error) - std::sqrt(current_error)) < tol)) {
-                converged = true;
-                std::cout << "Converged!" << std::endl;
-                final_error = std::sqrt(new_error);
-            }
-        } else {
+        } 
+        else {
             lambda = std::min(lambda * 10.0, 1e7);  // Increase lambda but not too large
         }
 
-        auto iter_end = timer::now();
-        std::cout << "Iteration time: "
-                << std::chrono::duration<double>(iter_end - iter_start).count()
-                << " seconds" << std::endl;
+        //auto iter_end = timer::now();
+        //std::cout << "Iteration time: "
+                //<< std::chrono::duration<double>(iter_end - iter_start).count()
+                //<< " seconds" << std::endl;
         final_error = min(std::sqrt(new_error),std::sqrt(current_error));
     }
 
@@ -1154,7 +1161,7 @@ void test_basic_calibration(){
     std::cout << "σ = " << current_sigma << std::endl;
     std::cout << "ρ = " << current_rho << std::endl;
     std::cout << "v₀ = " << current_v0 << std::endl;
-    std::cout << "error = " << final_error << std::endl;
+    std::cout << "final error = " << final_error << std::endl;
 
     auto t_end_second = timer::now();
     std::cout << "Total time after Updating parameters: "
