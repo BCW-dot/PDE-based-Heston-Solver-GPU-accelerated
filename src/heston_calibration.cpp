@@ -152,6 +152,7 @@ void compute_parameter_update_on_device(
     KokkosBlas::gemm("T", "N", 1.0, J, J, 0.0, JTJ);
 
     // Print J^T J
+    /*
     std::cout << std::fixed << std::setprecision(6);
     auto h_JTJ = Kokkos::create_mirror_view(JTJ);
     Kokkos::deep_copy(h_JTJ, JTJ);
@@ -162,6 +163,7 @@ void compute_parameter_update_on_device(
         }
         std::cout << "\n";
     }
+    */
     
     
 
@@ -171,6 +173,7 @@ void compute_parameter_update_on_device(
     });
 
     // Print modified matrix
+    /*
     Kokkos::deep_copy(h_JTJ, JTJ);
     std::cout << "\nJ^T J matrix after lambda modification (lambda = " << lambda << "):\n";
     for(int i = 0; i < N; i++) {
@@ -179,31 +182,37 @@ void compute_parameter_update_on_device(
         }
         std::cout << "\n";
     }
+    */
 
     // 3. Build J^T r => [5]
     Kokkos::View<double*> JTr("JTr", N);
     KokkosBlas::gemv("T", 1.0, J, residual, 0.0, JTr);
 
     // Print J^T r
+    /*
     auto h_JTr = Kokkos::create_mirror_view(JTr);
     Kokkos::deep_copy(h_JTr, JTr);
     std::cout << "\nJ^T r vector:\n";
     for(int i = 0; i < N; i++) {
         std::cout << std::scientific << std::setw(15) << h_JTr(i) << "\n";
     }
+    */
 
     // 4. Solve (JTJ) * delta = (JTr) on device with our manual 5x5 routine
     solve_5x5_device(JTJ, JTr, delta);
 
     // Print solution (delta)
+    /*
     auto h_delta = Kokkos::create_mirror_view(delta);
     Kokkos::deep_copy(h_delta, delta);
     std::cout << "\nSolution delta:\n";
     for(int i = 0; i < N; i++) {
         std::cout << std::scientific << std::setw(15) << h_delta(i) << "\n";
     }
+    */
 
     // Optional: verify solution by computing residual JTJ * delta - JTr
+    /*
     Kokkos::View<double*> verify("verify", N);
     KokkosBlas::gemv("N", 1.0, JTJ, delta, 0.0, verify);
     auto h_verify = Kokkos::create_mirror_view(verify);
@@ -217,6 +226,7 @@ void compute_parameter_update_on_device(
     }
     res_norm = std::sqrt(res_norm);
     std::cout << "||JTJ * delta - JTr|| = " << std::scientific << res_norm << "\n";
+    */
 }
 
 
@@ -798,9 +808,9 @@ void test_basic_calibration(){
     // Current parameter set
     
     const double rho = -0.9;
-    const double sigma = 0.3;
-    const double kappa = 2.5;
-    const double eta = 0.07;
+    const double sigma = 0.01;
+    const double kappa = 1.9;
+    const double eta = 0.06;
     
    
    /*
@@ -811,8 +821,8 @@ void test_basic_calibration(){
     */
     
     // Numerical parameters
-    const int m1 = 25;
-    const int m2 = 20;
+    const int m1 = 50;
+    const int m2 = 25;
 
     const int N = 20;
     const double theta = 0.8;
@@ -821,16 +831,16 @@ void test_basic_calibration(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 5;
+    const int num_strikes = 30;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = 90.0 + i;//S_0 * (0.3 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 - 0.3 * num_strikes + i;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
-    const int max_iter = 5;
+    const int max_iter = 15;
     const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
 
@@ -948,6 +958,7 @@ void test_basic_calibration(){
     Kokkos::View<double*> delta("delta", 5);
 
     // Current parameters that will be updated
+    // will be implicitely copied ifrom host to device. This is faster than keeping it on device
     double current_kappa = kappa;
     double current_eta = eta;
     double current_sigma = sigma;
@@ -959,10 +970,22 @@ void test_basic_calibration(){
 
     double final_error = 100; //
 
+    // Define bounds for updating
+    static constexpr double rho_min = -1.0, rho_max = 1.0;
+
+    /*
+    static constexpr double kappa_min = 1e-6, kappa_max = 20.0;
+    static constexpr double eta_min = 1e-6, eta_max = 1.0;
+    static constexpr double sigma_min = 1e-6, sigma_max = 5.0;
+    static constexpr double v0_min = 1e-6, v0_max = 1.0;
+    */
+    
+    
     // Main iteration loop
     for(int iter = 0; iter < max_iter && !converged; iter++) {
         auto iter_start = timer::now();
         std::cout << "\nIteration " << iter + 1 << " of " << max_iter << std::endl;
+
         //std::cout << "Current parameters: κ=" << current_kappa 
                 //<< ", η=" << current_eta 
                 //<< ", σ=" << current_sigma 
@@ -985,7 +1008,9 @@ void test_basic_calibration(){
             eps
         );
 
+        
         //printing Jacobian
+        /*
         auto h_J = Kokkos::create_mirror_view(J);
         Kokkos::deep_copy(h_J, J);
         
@@ -1018,7 +1043,7 @@ void test_basic_calibration(){
             }
             std::cout << "\n";
         }
-
+        */
 
         
         //base prices are already computed in compute_jacobian and stored in base_price
@@ -1033,24 +1058,37 @@ void test_basic_calibration(){
         compute_parameter_update_on_device(J, current_residuals, lambda, delta);
 
         // Get delta on host
+        // maybe it would be faster to store the new_paras on device so we dont have a data transfer here
         auto h_delta = Kokkos::create_mirror_view(delta);
         Kokkos::deep_copy(h_delta, delta);
 
         // Try new parameters
-        double new_kappa = current_kappa + h_delta(0);
-        double new_eta = current_eta + h_delta(1);
-        double new_sigma = current_sigma + h_delta(2);
-        double new_rho = current_rho + h_delta(3);
-        double new_v0 = current_v0 + h_delta(4);
+        double new_kappa = std::max(1e-6, current_kappa + h_delta(0));
+        double new_eta = std::max(1e-2, current_eta + h_delta(1));
+        double new_sigma = std::max(1e-2, current_sigma + h_delta(2));
+        double new_rho = std::min(rho_max, std::max(rho_min, current_rho + h_delta(3)));
+        double new_v0 = std::max(1e-2, current_v0 + h_delta(4));
+        
+        
+        /*
+        double new_kappa = std::min(kappa_max, std::max(kappa_min, current_kappa + h_delta(0)));
+        double new_eta = std::min(eta_max, std::max(eta_min, current_eta + h_delta(1)));
+        double new_sigma = std::min(sigma_max, std::max(sigma_min, current_sigma + h_delta(2)));
+        double new_rho = std::min(rho_max, std::max(rho_min, current_rho + h_delta(3)));
+        double new_v0 = std::min(v0_max, std::max(v0_min, current_v0 + h_delta(4)));
+        */
 
         //print the new params
-        std::cout << std::fixed << std::setprecision(6);
+        /*
+        std::cout << std::fixed << std::setprecision(10);
         std::vector<double> new_params = {new_kappa, new_eta, new_sigma, new_rho, new_v0};
         std::cout << "The new parameters: ";
         for(int i =0; i< new_params.size(); i++){
             std::cout << new_params[i] << ", ";
         }
         std::cout << "\n";
+        */
+        
 
         // Compute delta norm (matching np.linalg.norm(delta))
         double delta_norm = 0.0;
@@ -1067,7 +1105,7 @@ void test_basic_calibration(){
         for(int i = 0; i < num_strikes; i++) {
             current_error += h_current_residuals(i) * h_current_residuals(i);
         }
-        std::cout << "Current error: " << std::sqrt(current_error) << std::endl;
+        //std::cout << "Current error: " << current_error << std::endl;
 
         // Check convergence
         if(delta_norm < tol ||   
@@ -1085,14 +1123,13 @@ void test_basic_calibration(){
             current_rho = new_rho;
             current_v0 = new_v0;
 
-            final_error = std::sqrt(current_error);
+            final_error = current_error;
             break; // Exit the loop
         }
 
         // Compute new prices with updated parameters
-        Kokkos::deep_copy(workspace.U, U_0); //donno if this is needed
-        //Rebuilding is done inside
-        //need to check if correct option prices are computed here
+        Kokkos::deep_copy(workspace.U, U_0); // reset init condition
+        //Rebuilding the variance direction for new_v0 is done inside the kernel
         compute_base_prices(S_0, new_v0, T,
                 r_d, r_f,
                 new_rho, new_sigma, new_kappa, new_eta,
@@ -1105,6 +1142,7 @@ void test_basic_calibration(){
             );
 
         //print the new base prices
+        /*
         std::cout << std::fixed << std::setprecision(12);
         auto h_base_prices   = Kokkos::create_mirror_view(base_prices);
         Kokkos::deep_copy(h_base_prices,   base_prices);
@@ -1113,6 +1151,7 @@ void test_basic_calibration(){
             std::cout << h_base_prices(i) << ", ";
         }
         std::cout << "\n";
+        */
 
         // Compute new residuals
         Kokkos::parallel_for("compute_new_residuals", num_strikes, 
@@ -1131,7 +1170,7 @@ void test_basic_calibration(){
         }
 
         //std::cout << "Current error: " << std::sqrt(current_error) << std::endl;
-        std::cout << "New error: " << std::sqrt(new_error) << std::endl;
+        //std::cout << "New error: " << new_error << std::endl;
         
 
         // Update parameters based on error improvement
@@ -1151,7 +1190,7 @@ void test_basic_calibration(){
         //std::cout << "Iteration time: "
                 //<< std::chrono::duration<double>(iter_end - iter_start).count()
                 //<< " seconds" << std::endl;
-        final_error = min(std::sqrt(new_error),std::sqrt(current_error));
+        //final_error = min(new_error,current_error);
     }
 
     // Print final results
@@ -1184,10 +1223,16 @@ void test_basic_calibration(){
     //   - number of options
     //   - total runtime
     //   - final error
+    // Write metadata with calibrated parameters
     double total_time = std::chrono::duration<double>(t_end_second - t_start).count();
     out << "# " << num_strikes 
         << " options, Time=" << total_time 
         << " s, FinalError=" << final_error 
+        << ", kappa=" << current_kappa
+        << ", eta=" << current_eta
+        << ", sigma=" << current_sigma
+        << ", rho=" << current_rho
+        << ", v0=" << current_v0
         << "\n";
 
     // Write CSV header
@@ -1208,7 +1253,6 @@ void test_basic_calibration(){
 
     out.close();
     std::cout << "Exported final results to " << csv_filename << std::endl;
-    
 }
 
 
