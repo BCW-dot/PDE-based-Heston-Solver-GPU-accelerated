@@ -799,26 +799,27 @@ void test_basic_calibration(){
 
     // Market parameters
     const double S_0 = 100.0;
-    const double V_0 = 0.04;
     const double T = 1.0;
 
     const double r_d = 0.025;
     const double r_f = 0.0;
 
     // Current parameter set
+    const double V_0 = 0.04;
     
+    /*
     const double rho = -0.9;
-    const double sigma = 0.01;
-    const double kappa = 1.9;
-    const double eta = 0.06;
-    
-   
-   /*
-    const double rho = -0.3;
-    const double sigma = 0.2;
-    const double kappa = 3.0;
-    const double eta = 0.1;
+    const double sigma = 0.03;
+    const double kappa = 1.5;
+    const double eta = 0.04;
     */
+   
+   
+    const double rho = 0.03;
+    const double sigma = 0.02;
+    const double kappa = 3.0;
+    const double eta = 0.01;
+    
     
     // Numerical parameters
     const int m1 = 50;
@@ -831,11 +832,11 @@ void test_basic_calibration(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 30;
+    const int num_strikes = 20;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 - 0.3 * num_strikes + i;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.3 + i;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -968,7 +969,8 @@ void test_basic_calibration(){
     double lambda = 0.01; // Initial LM parameter
     bool converged = false;
 
-    double final_error = 100; //
+    double final_error = 100.0; // for plot information
+    int iteration_count = 0;
 
     // Define bounds for updating
     static constexpr double rho_min = -1.0, rho_max = 1.0;
@@ -1063,7 +1065,7 @@ void test_basic_calibration(){
         Kokkos::deep_copy(h_delta, delta);
 
         // Try new parameters
-        double new_kappa = std::max(1e-6, current_kappa + h_delta(0));
+        double new_kappa = std::max(1e-3, current_kappa + h_delta(0));
         double new_eta = std::max(1e-2, current_eta + h_delta(1));
         double new_sigma = std::max(1e-2, current_sigma + h_delta(2));
         double new_rho = std::min(rho_max, std::max(rho_min, current_rho + h_delta(3)));
@@ -1124,6 +1126,7 @@ void test_basic_calibration(){
             current_v0 = new_v0;
 
             final_error = current_error;
+            iteration_count = iter + 1;
             break; // Exit the loop
         }
 
@@ -1190,7 +1193,9 @@ void test_basic_calibration(){
         //std::cout << "Iteration time: "
                 //<< std::chrono::duration<double>(iter_end - iter_start).count()
                 //<< " seconds" << std::endl;
-        //final_error = min(new_error,current_error);
+        //if delta norm and error do not get lower than "tol" and max iter is hit
+        final_error = std::min(new_error,current_error);
+        iteration_count = iter + 1;
     }
 
     // Print final results
@@ -1201,6 +1206,7 @@ void test_basic_calibration(){
     std::cout << "ρ = " << current_rho << std::endl;
     std::cout << "v₀ = " << current_v0 << std::endl;
     std::cout << "final error = " << final_error << std::endl;
+    std::cout << "total iterations = " << iteration_count << std::endl;
 
     auto t_end_second = timer::now();
     std::cout << "Total time after Updating parameters: "
@@ -1227,12 +1233,18 @@ void test_basic_calibration(){
     double total_time = std::chrono::duration<double>(t_end_second - t_start).count();
     out << "# " << num_strikes 
         << " options, Time=" << total_time 
-        << " s, FinalError=" << final_error 
-        << ", kappa=" << current_kappa
-        << ", eta=" << current_eta
-        << ", sigma=" << current_sigma
-        << ", rho=" << current_rho
-        << ", v0=" << current_v0
+        << " s, FinalError=" << final_error
+        << ", iterationCount=" << iteration_count
+        << ", init_kappa=" << kappa
+        << ", init_eta="  << eta
+        << ", init_sigma="<< sigma
+        << ", init_rho="  << rho
+        << ", init_v0="   << V_0
+        << ", kappa="     << current_kappa
+        << ", eta="       << current_eta
+        << ", sigma="     << current_sigma
+        << ", rho="       << current_rho
+        << ", v0="        << current_v0
         << "\n";
 
     // Write CSV header
