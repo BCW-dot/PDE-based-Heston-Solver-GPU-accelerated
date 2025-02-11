@@ -1232,6 +1232,10 @@ void test_lambda_american_call() {
 }
 
 //Test which computes a call price with a divident paying underlying
+//I implemented only discrete dividents here. So pricing options on a single underlying which pays frequent dividends
+//I did not implement a divident yield q whcih can be used to model continuously paid dividents. This is used for options
+//on indexes. This is not hard to implement, we only need to adjust the variable for A1 matrix for the first derivative 
+// to r_d - r_f - q. Since i am short on time, i did not do that (I would need to go over every A1 call i make in this project)
 void test_heston_divident_call_shuffled() {
     // Test parameters
     double K = 100.0;
@@ -1253,7 +1257,7 @@ void test_heston_divident_call_shuffled() {
     int m2 = 25;
 
     int m = (m1 + 1) * (m2 + 1);
-    int N = 50;
+    int N = 30;
     double theta = 0.8;
 
     std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
@@ -1298,9 +1302,9 @@ void test_heston_divident_call_shuffled() {
     //A2.build_implicit(theta, delta_t);
     A2_shuf.build_implicit(theta, delta_t);
 
-    std::vector<double> dividend_dates = {0.2, 0.5, 0.7};
-    std::vector<double> dividend_amounts = {0, 0, 0};
-    std::vector<double> dividend_percentages = {0.1, 0.1, 0.1};
+    std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
 
     auto device_Vec_s = grid.device_Vec_s;
 
@@ -1343,8 +1347,19 @@ void test_heston_divident_call_shuffled() {
     int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
     //int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
     double option_price = h_U[index_s + index_v*(m1+1)];
+    
+    //"true" price for:
+    /*
+    usual test parameters and 
+    std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+    */
+    const double reference_price = 3.839290124997349;
 
     std::cout << std::setprecision(16) << "Price: " << option_price << std::endl;
+    std::cout << "Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
+    std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
 
     ResultsExporter::exportToCSV("dividend_shuffled_heston_do_scheme", grid, U);
 
@@ -1370,7 +1385,245 @@ void test_heston_divident_call_shuffled() {
     }
     outfile.close();
 
-    std::cout << "Price surface data written to option_surface.csv\n";
+    //std::cout << "Price surface data written to option_surface.csv\n";
+}
+
+//this Test computes the call price of an american option on a stock which pays dividends
+void test_heston_american_dividend_call_shuffled() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = 100.0;
+
+    double V_0 = 0.04;
+
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 50;
+    int m2 = 25;
+
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 30;
+    double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
+
+    // Create grid
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
+
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+
+    // Build boundary conditions
+    BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), m1 + 1));
+
+    // Initial condition
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j * (m1 + 1)) = std::max(grid.Vec_s[i] - K, 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+    //for dividends
+    std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+
+    auto device_Vec_s = grid.device_Vec_s;
+
+    // Solve using DO scheme
+    DO_scheme_american_dividend_shuffled(
+        m, m1, m2, N, U_0, delta_t, theta, 
+        dividend_dates,
+        dividend_amounts,
+        dividend_percentages,
+        device_Vec_s,   // Stock price grid on device
+        A0, A1, A2_shuf, bounds, r_f,
+        U);
+
+    // Get result
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+
+    // Find price at S_0, V_0
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    
+    const double reference_price = 5.285130942409008;
+    std::cout << std::setprecision(16) << option_price << std::endl;
+    std::cout << "Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
+    std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+
+    ResultsExporter::exportToCSV("american_dividend_shuffled_heston_do_scheme", grid, U);
+    
+}
+
+//Test that the lambda function picks up the dividend dates 
+void test_lambda_american_dividend_call() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = 100.0;
+
+    double V_0 = 0.04;
+
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 50;
+    int m2 = 25;
+
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 20;
+    double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
+
+    // Create grid
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
+
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+
+    // Build boundary conditions
+    BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), m1 + 1));
+
+    // Initial condition
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j * (m1 + 1)) = std::max(grid.Vec_s[i] - K, 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+    //for american
+    std::vector<std::vector<double>> lambda_evolution(N + 1, std::vector<double>(m1 + 1, 0.0));
+
+    //for dividends
+    std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+
+    auto device_Vec_s = grid.device_Vec_s;
+
+    // Solve using DO scheme
+    DO_scheme_american_dividend_shuffle_with_lambda_tracking(
+        m, m1, m2, N, U_0, delta_t, theta, 
+        dividend_dates,
+        dividend_amounts,
+        dividend_percentages,
+        device_Vec_s,   // Stock price grid on device
+        A0, A1, A2_shuf, bounds, r_f,
+        V_0,
+        U,
+        lambda_evolution);
+
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+
+    // Find price at S_0, V_0
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    std::cout << std::setprecision(16) << option_price << std::endl;
+
+    // Write lambda evolution to CSV file
+    std::string output_file = "lambda_surface_dividends.csv";
+    std::ofstream outfile(output_file);
+    if(!outfile.is_open()) {
+        std::cerr << "Failed to open output file: " << output_file << std::endl;
+        return;
+    }
+
+    // Write metadata as comments
+    outfile << "# Lambda Surface Data\n";
+    outfile << "# Time steps: " << N << "\n";
+    outfile << "# Delta t: " << delta_t << "\n";
+    outfile << "# Total time: " << N * delta_t << "\n\n";
+
+    // Write header with actual stock prices
+    outfile << "time";
+    for(int i = 0; i <= m1; i++) {
+        outfile << "," << grid.Vec_s[i];  // Write actual stock price value
+    }
+    outfile << "\n";
+
+    // Write data
+    for(int n = 0; n <= N; n++) {
+        outfile << n * delta_t;  // Time point
+        for(int i = 0; i <= m1; i++) {
+            outfile << "," << lambda_evolution[n][i];
+        }
+        outfile << "\n";
+    }
+    outfile.close();
+
+    std::cout << "Lambda surface data exported to " << output_file << std::endl;
 }
 
 
@@ -1911,7 +2164,11 @@ void test_DO_scheme() {
 
         //test_heston_american_call_shuffled();
         //test_lambda_american_call();
-        test_heston_divident_call_shuffled();
+
+        //test_heston_divident_call_shuffled();
+
+        test_heston_american_dividend_call_shuffled();
+        //test_lambda_american_dividend_call();
 
         /*
 

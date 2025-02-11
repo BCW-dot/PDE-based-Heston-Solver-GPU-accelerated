@@ -612,6 +612,206 @@ void DO_scheme_dividend_shuffled(
 }
 
 
+template<class ViewType>
+void DO_scheme_american_dividend_shuffled(
+    const int m,                    
+    const int m1,                    
+    const int m2,                    
+    const int N,                     
+    const ViewType& U_0,             
+    const double delta_t,            
+    const double theta,
+    const std::vector<double>& dividend_dates,    // Host vector
+    const std::vector<double>& dividend_amounts,  // Host vector 
+    const std::vector<double>& dividend_percentages, // Host vector    
+    ViewType& device_Vec_s, //device side stock values          
+    heston_A0Storage_gpu& A0,        
+    heston_A1Storage_gpu& A1,                
+    heston_A2_shuffled& A2_shuf,     
+    const BoundaryConditions& bounds,
+    const double r_f,                
+    ViewType& U) {                   
+    
+    // Initialize result with initial condition
+    Kokkos::deep_copy(U, U_0);
+
+    // Create persistent workspace vectors
+    ViewType Y_0("Y_0", m);
+    ViewType Y_1("Y_1", m);
+    ViewType A0_result("A0_result", m);
+    ViewType A1_result("A1_result", m);
+
+    ViewType Y_1_shuffled("Y_1_shuffled", m);
+    ViewType U_next_shuffled("U_next_shuffled", m);
+    ViewType U_shuffled("U_shuffled", m);
+    ViewType A2_result_shuffled("A2_result_shuffled", m);
+    ViewType A2_result_unshuf("A2_result_unshuf", m);
+
+    // Create lambda workspace for American option
+    ViewType lambda_bar("lambda_bar", m);
+    Kokkos::deep_copy(lambda_bar, 0.0);  // Initialize lambda to zero
+
+    // Create mutable copies of dividend data that we can modify
+    std::vector<double> div_dates = dividend_dates;
+    std::vector<double> div_amounts = dividend_amounts;
+    std::vector<double> div_percentages = dividend_percentages;
+
+    // Get boundary vectors
+    auto b = bounds.get_b();
+    auto b1 = bounds.get_b1();
+    auto b2 = bounds.get_b2();
+
+    using timer = std::chrono::high_resolution_clock;
+    auto t_start = timer::now();
+
+    // Main time stepping loop
+    for (int n = 1; n <= N; n++) {
+        double t = n * delta_t;
+
+        // Check for dividend payment
+        while(!div_dates.empty() && t <= div_dates[0] && div_dates[0] < (n+1) * delta_t) {
+            double div_date = div_dates[0];
+            double div_amount = div_amounts[0];
+            double div_percentage = div_percentages[0];
+
+            // Remove processed dividend
+            div_dates.erase(div_dates.begin());
+            div_amounts.erase(div_amounts.begin());
+            div_percentages.erase(div_percentages.begin());
+
+            std::cout << "Processing dividend at t = " << div_date 
+                      << ", amount = " << div_amount 
+                      << ", percentage = " << div_percentage << std::endl;
+
+            // Create temporary storage for new values
+            ViewType U_new("U_new", U.extent(0));
+            Kokkos::deep_copy(U_new, U);
+
+            // Process dividend on device
+            Kokkos::parallel_for("dividend_adjustment", 
+                Kokkos::RangePolicy<>(0, m2+1),
+                KOKKOS_LAMBDA(const int j) {
+                    const int offset = j * (m1 + 1);
+                    
+                    // For each stock price level
+                    for(int i = 0; i <= m1; i++) {
+                        double old_s = device_Vec_s(i);
+                        double new_s = old_s * (1.0 - div_percentage) - div_amount;
+
+                        if(new_s > 0) {
+                            // Find interpolation points
+                            int idx = 0;
+                            for(int k = 0; k <= m1; k++) {
+                                if(device_Vec_s(k) > new_s) {
+                                    idx = k;
+                                    break;
+                                }
+                            }
+
+                            if(idx > 0 && idx < m1 + 1) {
+                                // Interpolate
+                                double s_low = device_Vec_s(idx-1);
+                                double s_high = device_Vec_s(idx);
+                                double weight = (new_s - s_low) / (s_high - s_low);
+                                
+                                double val_low = U(offset + idx-1);
+                                double val_high = U(offset + idx);
+                                U_new(offset + i) = (1.0 - weight) * val_low + weight * val_high;
+                            }
+                            else if(idx == 0) {
+                                // Left extrapolation
+                                U_new(offset + i) = U(offset);
+                            }
+                            else {
+                                // Right extrapolation
+                                U_new(offset + i) = U(offset + m1);
+                            }
+                        }
+                        else {
+                            U_new(offset + i) = 0.0;
+                        }
+                    }
+                });
+            
+            // Update U with new values
+            Kokkos::deep_copy(U, U_new);
+        }
+
+        //need to zero out A0
+        ViewType A0_result("A0_result", m);
+
+        // Step 1: Matrix multiplications
+        A0.multiply_parallel_s_and_v(U, A0_result);
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        // Y_0 computation now includes lambda contribution
+        Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor = std::exp(r_f * delta_t * (n-1));
+            Y_0(i) = U(i) + delta_t * (A0_result(i) + A1_result(i) + 
+                        A2_result_unshuf(i) + b(i) * exp_factor + 
+                        lambda_bar(i));  // Add lambda contribution
+        });
+
+        // A1 step
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_0(i) + theta * delta_t * (b1(i) * exp_factor_n - 
+                        (A1_result(i) + b1(i) * exp_factor_nm1));
+            Y_0(i) = rhs;
+        });
+        
+        A1.solve_implicit_parallel_v(Y_1, Y_0);
+
+        // A2 step
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_n - 
+                        (A2_result_unshuf(i) + b2(i) * exp_factor_nm1));
+            Y_1(i) = rhs;
+        });
+
+        shuffle_vector(Y_1, Y_1_shuffled, m1, m2);
+        A2_shuf.solve_implicit(U_next_shuffled, Y_1_shuffled);
+        unshuffle_vector(U_next_shuffled, U, m1, m2);
+
+        // American option early exercise check and lambda update
+        Kokkos::parallel_for("early_exercise_check", m, KOKKOS_LAMBDA(const int i) {
+            // Apply early exercise condition
+            const double U_bar = U(i);
+            U(i) = Kokkos::max(U_bar - delta_t * lambda_bar(i), U_0(i));
+
+            // Update lambda multiplier
+            lambda_bar(i) = Kokkos::max(0.0, lambda_bar(i) + (U_0(i) - U_bar) / delta_t);
+
+            //This helps with stability
+            // Set lambda to zero at S_max for all variance levels
+            // Every (m1+1)th entry starting at index m1 is an S_max entry
+            if(i % (m1 + 1) == m1) {  // This hits exactly S_max entries at all variance levels
+                lambda_bar(i) = 0.0;
+            }
+        });
+    
+    }
+
+    auto t_end = timer::now();
+    std::cout << "DO American time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+}
+
+
 
 
 //First impleemntation of a different scheme
@@ -1077,6 +1277,219 @@ void DO_scheme_american_shuffle_with_lambda_tracking(
               << " seconds" << std::endl;
 }
 
+template<class ViewType>
+void DO_scheme_american_dividend_shuffle_with_lambda_tracking(
+    const int m,                    
+    const int m1,                    
+    const int m2,                    
+    const int N,                     
+    const ViewType& U_0,             
+    const double delta_t,            
+    const double theta,
+    const std::vector<double>& dividend_dates,    // Host vector
+    const std::vector<double>& dividend_amounts,  // Host vector 
+    const std::vector<double>& dividend_percentages, // Host vector    
+    ViewType& device_Vec_s, //device side stock values          
+    heston_A0Storage_gpu& A0,        
+    heston_A1Storage_gpu& A1,                
+    heston_A2_shuffled& A2_shuf,     
+    const BoundaryConditions& bounds,
+    const double r_f,
+    const double V_0,                
+    ViewType& U,
+    std::vector<std::vector<double>>& lambda_evolution) {                   
+    
+    // Initialize result with initial condition
+    Kokkos::deep_copy(U, U_0);
+
+    // Create persistent workspace vectors
+    ViewType Y_0("Y_0", m);
+    ViewType Y_1("Y_1", m);
+    ViewType A0_result("A0_result", m);
+    ViewType A1_result("A1_result", m);
+
+    ViewType Y_1_shuffled("Y_1_shuffled", m);
+    ViewType U_next_shuffled("U_next_shuffled", m);
+    ViewType U_shuffled("U_shuffled", m);
+    ViewType A2_result_shuffled("A2_result_shuffled", m);
+    ViewType A2_result_unshuf("A2_result_unshuf", m);
+
+    // Create lambda workspace for American option
+    ViewType lambda_bar("lambda_bar", m);
+    Kokkos::deep_copy(lambda_bar, 0.0);  // Initialize lambda to zero
+
+    // Create mutable copies of dividend data that we can modify
+    std::vector<double> div_dates = dividend_dates;
+    std::vector<double> div_amounts = dividend_amounts;
+    std::vector<double> div_percentages = dividend_percentages;
+
+    // Get boundary vectors
+    auto b = bounds.get_b();
+    auto b1 = bounds.get_b1();
+    auto b2 = bounds.get_b2();
+
+    const int v_index = std::floor(V_0 * (m2 + 1) / 5.0);  // Assuming V_max = 5.0
+
+    // Store initial lambda values
+    auto h_lambda = Kokkos::create_mirror_view(lambda_bar);
+    Kokkos::deep_copy(h_lambda, lambda_bar);
+    for(int i = 0; i <= m1; i++) {
+        lambda_evolution[0][i] = h_lambda[i + v_index * (m1 + 1)];
+    }
+
+    using timer = std::chrono::high_resolution_clock;
+    auto t_start = timer::now();
+
+    // Main time stepping loop
+    for (int n = 1; n <= N; n++) {
+        double t = n * delta_t;
+
+        // Check for dividend payment
+        while(!div_dates.empty() && t <= div_dates[0] && div_dates[0] < (n+1) * delta_t) {
+            double div_date = div_dates[0];
+            double div_amount = div_amounts[0];
+            double div_percentage = div_percentages[0];
+
+            // Remove processed dividend
+            div_dates.erase(div_dates.begin());
+            div_amounts.erase(div_amounts.begin());
+            div_percentages.erase(div_percentages.begin());
+
+            std::cout << "Processing dividend at t = " << div_date 
+                      << ", amount = " << div_amount 
+                      << ", percentage = " << div_percentage << std::endl;
+
+            // Create temporary storage for new values
+            ViewType U_new("U_new", U.extent(0));
+            Kokkos::deep_copy(U_new, U);
+
+            // Process dividend on device
+            Kokkos::parallel_for("dividend_adjustment", 
+                Kokkos::RangePolicy<>(0, m2+1),
+                KOKKOS_LAMBDA(const int j) {
+                    const int offset = j * (m1 + 1);
+                    
+                    // For each stock price level
+                    for(int i = 0; i <= m1; i++) {
+                        double old_s = device_Vec_s(i);
+                        double new_s = old_s * (1.0 - div_percentage) - div_amount;
+
+                        if(new_s > 0) {
+                            // Find interpolation points
+                            int idx = 0;
+                            for(int k = 0; k <= m1; k++) {
+                                if(device_Vec_s(k) > new_s) {
+                                    idx = k;
+                                    break;
+                                }
+                            }
+
+                            if(idx > 0 && idx < m1 + 1) {
+                                // Interpolate
+                                double s_low = device_Vec_s(idx-1);
+                                double s_high = device_Vec_s(idx);
+                                double weight = (new_s - s_low) / (s_high - s_low);
+                                
+                                double val_low = U(offset + idx-1);
+                                double val_high = U(offset + idx);
+                                U_new(offset + i) = (1.0 - weight) * val_low + weight * val_high;
+                            }
+                            else if(idx == 0) {
+                                // Left extrapolation
+                                U_new(offset + i) = U(offset);
+                            }
+                            else {
+                                // Right extrapolation
+                                U_new(offset + i) = U(offset + m1);
+                            }
+                        }
+                        else {
+                            U_new(offset + i) = 0.0;
+                        }
+                    }
+                });
+            
+            // Update U with new values
+            Kokkos::deep_copy(U, U_new);
+        }
+
+        //need to zero out A0
+        ViewType A0_result("A0_result", m);
+
+        // Step 1: Matrix multiplications
+        A0.multiply_parallel_s_and_v(U, A0_result);
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        // Y_0 computation now includes lambda contribution
+        Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor = std::exp(r_f * delta_t * (n-1));
+            Y_0(i) = U(i) + delta_t * (A0_result(i) + A1_result(i) + 
+                        A2_result_unshuf(i) + b(i) * exp_factor + 
+                        lambda_bar(i));  // Add lambda contribution
+        });
+
+        // A1 step
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_0(i) + theta * delta_t * (b1(i) * exp_factor_n - 
+                        (A1_result(i) + b1(i) * exp_factor_nm1));
+            Y_0(i) = rhs;
+        });
+        
+        A1.solve_implicit_parallel_v(Y_1, Y_0);
+
+        // A2 step
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_n - 
+                        (A2_result_unshuf(i) + b2(i) * exp_factor_nm1));
+            Y_1(i) = rhs;
+        });
+
+        shuffle_vector(Y_1, Y_1_shuffled, m1, m2);
+        A2_shuf.solve_implicit(U_next_shuffled, Y_1_shuffled);
+        unshuffle_vector(U_next_shuffled, U, m1, m2);
+
+        // American option early exercise check and lambda update
+        Kokkos::parallel_for("early_exercise_check", m, KOKKOS_LAMBDA(const int i) {
+            // Apply early exercise condition
+            const double U_bar = U(i);
+            U(i) = Kokkos::max(U_bar - delta_t * lambda_bar(i), U_0(i));
+
+            // Update lambda multiplier
+            lambda_bar(i) = Kokkos::max(0.0, lambda_bar(i) + (U_0(i) - U_bar) / delta_t);
+
+            // Set lambda to zero at S_max for all variance levels
+            // Every (m1+1)th entry starting at index m1 is an S_max entry
+            if(i % (m1 + 1) == m1) {  // This hits exactly S_max entries at all variance levels
+                lambda_bar(i) = 0.0;
+            }
+        });
+
+        Kokkos::deep_copy(h_lambda, lambda_bar);
+        for(int i = 0; i <= m1; i++) {
+            lambda_evolution[n][i] = h_lambda[i + v_index * (m1 + 1)];
+        }
+        
+    }
+
+    auto t_end = timer::now();
+    std::cout << "DO American time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+}
 
 
 
