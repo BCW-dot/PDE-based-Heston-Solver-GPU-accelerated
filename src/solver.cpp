@@ -1046,8 +1046,8 @@ void test_heston_american_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 100;
-    int m2 = 75;
+    int m1 = 50;
+    int m2 = 25;
 
     int m = (m1 + 1) * (m2 + 1);
     int N = 20;
@@ -1230,6 +1230,149 @@ void test_lambda_american_call() {
 
     std::cout << "Lambda surface data exported to " << output_file << std::endl;
 }
+
+//Test which computes a call price with a divident paying underlying
+void test_heston_divident_call_shuffled() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = 100;
+
+    double V_0 = 0.04;
+
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 50;
+    int m2 = 25;
+
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 50;
+    double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
+
+    // Create grid
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
+
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+
+    // Build boundary conditions
+    BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), m1 + 1));
+
+    // Initial condition
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j * (m1 + 1)) = std::max(grid.Vec_s[i] - K, 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    //A2.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+    std::vector<double> dividend_dates = {0.2, 0.5, 0.7};
+    std::vector<double> dividend_amounts = {0, 0, 0};
+    std::vector<double> dividend_percentages = {0.1, 0.1, 0.1};
+
+    auto device_Vec_s = grid.device_Vec_s;
+
+    // Create Views for storing the time evolution at V_0
+    //only for ploting (vizual test)
+    Kokkos::View<double**> price_surface("price_surface", N+1, m1+1);  // [time][stock]
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+
+    // Solve using DO scheme
+    //for( int i = 0; i<15; i++){
+        DO_scheme_dividend_shuffled(
+            m,              // Total size
+            m1,             // Stock price points
+            m2,             // Variance points
+            N,              // Time steps
+            U_0,            // Initial condition
+            delta_t,        // Time step size
+            theta,          // Weight parameter
+            dividend_dates,
+            dividend_amounts,
+            dividend_percentages,
+            device_Vec_s,   // Stock price grid on device
+            A0,             // Matrices
+            A1,
+            A2_shuf,
+            bounds,         // Boundary conditions
+            r_f,            // Foreign interest rate
+            U,              // Result vector
+            price_surface, //for plotting
+            index_v
+        );
+    //}
+
+    // Get result
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+
+    // Find price at S_0, V_0
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    //int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    std::cout << std::setprecision(16) << "Price: " << option_price << std::endl;
+
+    ResultsExporter::exportToCSV("dividend_shuffled_heston_do_scheme", grid, U);
+
+    //print the option price surface agaisnt stock and time
+    // Copy results to host for CSV export
+    auto h_price_surface = Kokkos::create_mirror_view(price_surface);
+    auto h_Vec_s = Kokkos::create_mirror_view(device_Vec_s);
+    Kokkos::deep_copy(h_price_surface, price_surface);
+    Kokkos::deep_copy(h_Vec_s, device_Vec_s);
+
+    // Export to CSV
+    std::ofstream outfile("option_surface.csv");
+    outfile << "time,stock,price\n";  // CSV header
+
+    // Write data
+    for(int n = 0; n <= N; n++) {
+        double t = n * delta_t;
+        for(int i = 0; i <= m1; i++) {
+            outfile << t << "," 
+                    << h_Vec_s(i) << "," 
+                    << h_price_surface(n,i) << "\n";
+        }
+    }
+    outfile.close();
+
+    std::cout << "Price surface data written to option_surface.csv\n";
+}
+
 
 /*
 
@@ -1746,21 +1889,36 @@ void test_parallel_tridiagonal2() {
 void test_DO_scheme() {
     Kokkos::initialize();
         {
-        //First DO scheme tests. Here we have a "normal" A2 matrix with sequentially linked diagonals
+        /*
+
+        * First DO scheme tests. Here we have a "normal" A2 matrix with sequentially linked diagonals
+
+        */
+        
         //test_parallel_tridiagonal2();
         //test_heston_call();
         //test_DO_m1_convergence();
         //test_all_convergence();
+        
+        /*
 
-        //Tests where we shuffled the A2 direction to have independent diagonals
+        * Tests where we shuffled the A2 direction to have independent diagonals
+
+        */
         //test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
         //test_shuffled_convergence();
 
         //test_heston_american_call_shuffled();
-        test_lambda_american_call();
+        //test_lambda_american_call();
+        test_heston_divident_call_shuffled();
 
-        //Test for a different scheme. It has the same convergence as the DO scheme
+        /*
+
+        * Test for a different scheme. It has the same convergence as the DO scheme
+
+        */
+        
         //test_CS_scheme_call();
         //test_CS_convergence();
         //test_CS_shuffled();
