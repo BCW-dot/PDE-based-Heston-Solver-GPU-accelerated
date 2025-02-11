@@ -14,7 +14,7 @@ void test_device_a2_shuffled_multiple_instances() {
     using timer = std::chrono::high_resolution_clock;
     using Device = Kokkos::DefaultExecutionSpace;
 
-    const int m1 = 150;
+    const int m1 = 100;
     const int m2 = 75;
     std::cout << "A2 Dimension StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
@@ -85,7 +85,7 @@ void test_device_a2_shuffled_multiple_instances() {
     using member_type = team_policy::member_type;
     team_policy policy(nInstances, Kokkos::AUTO);
 
-    const int NUM_RUNS = 5;
+    const int NUM_RUNS = 50;
     std::vector<double> timings(NUM_RUNS);
 
     for(int run = 0; run < NUM_RUNS; run++) {
@@ -240,7 +240,7 @@ void test_device_a2_shuffled_comparison() {
     Kokkos::fence();
 
     auto t_end = timer::now();
-    std::cout << "Implicit solve time: "
+    std::cout << "HERE BUILD Implicit solve time: "
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
 

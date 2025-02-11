@@ -350,12 +350,12 @@ public:
         // Initialize all matrices including shuffled A2
         heston_A0Storage_gpu A0(m1, m2);
         heston_A1Storage_gpu A1(m1, m2);
-        heston_A2Storage_gpu A2(m1, m2);
+        //heston_A2Storage_gpu A2(m1, m2);
         heston_A2_shuffled A2_shuf(m1, m2);
 
         A0.build_matrix(grid, rho, sigma);
         A1.build_matrix(grid, rho, sigma, r_d, r_f);
-        A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+        //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
         A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
         const int N = 20;
@@ -363,7 +363,7 @@ public:
         const double theta = 0.5;
 
         A1.build_implicit(theta, delta_t);
-        A2.build_implicit(theta, delta_t);
+        //A2.build_implicit(theta, delta_t);
         A2_shuf.build_implicit(theta, delta_t);
 
         BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
@@ -382,7 +382,7 @@ public:
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2, A2_shuf, bounds, r_f, U);
+        DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);//A2, A2_shuf, bounds, r_f, U);
 
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> duration = (end - start);
@@ -439,12 +439,12 @@ public:
             // Initialize matrices including shuffled A2
             heston_A0Storage_gpu A0(m1, m2);
             heston_A1Storage_gpu A1(m1, m2);
-            heston_A2Storage_gpu A2(m1, m2);
+            //heston_A2Storage_gpu A2(m1, m2);
             heston_A2_shuffled A2_shuf(m1, m2);
 
             A0.build_matrix(grid, rho, sigma);
             A1.build_matrix(grid, rho, sigma, r_d, r_f);
-            A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+            //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
             A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
             const int N = 80;
@@ -452,7 +452,7 @@ public:
             const double theta = 0.5;
 
             A1.build_implicit(theta, delta_t);
-            A2.build_implicit(theta, delta_t);
+            //A2.build_implicit(theta, delta_t);
             A2_shuf.build_implicit(theta, delta_t);
 
             BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
@@ -471,7 +471,7 @@ public:
 
             auto start = std::chrono::high_resolution_clock::now();
             
-            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2, A2_shuf, bounds, r_f, U);
+            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);//A2, A2_shuf, bounds, r_f, U);
 
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> duration = end - start;
@@ -518,19 +518,19 @@ public:
             
             heston_A0Storage_gpu A0(m1, m2);
             heston_A1Storage_gpu A1(m1, m2);
-            heston_A2Storage_gpu A2(m1, m2);
+            //heston_A2Storage_gpu A2(m1, m2);
             heston_A2_shuffled A2_shuf(m1, m2);
 
             A0.build_matrix(grid, rho, sigma);
             A1.build_matrix(grid, rho, sigma, r_d, r_f);
-            A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+            //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
             A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
             const double delta_t = T / N;
             const double theta = 0.5;
 
             A1.build_implicit(theta, delta_t);
-            A2.build_implicit(theta, delta_t);
+            //A2.build_implicit(theta, delta_t);
             A2_shuf.build_implicit(theta, delta_t);
 
             BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
@@ -549,7 +549,7 @@ public:
 
             auto start = std::chrono::high_resolution_clock::now();
             
-            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2, A2_shuf, bounds, r_f, U);
+            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);//A2, A2_shuf, bounds, r_f, U);
             
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> duration = end - start;
@@ -785,22 +785,28 @@ Shuffled DO scheme tests
 void test_heston_call_shuffled() {
     // Test parameters
     double K = 100.0;
-    double S_0 = 90;
+    double S_0 = 100;
+
     double V_0 = 0.04;
+
     double T = 1.0;
+
     double r_d = 0.025;
     double r_f = 0.0;
+
     double rho = -0.9;
     double sigma = 0.3;
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 50;
-    int m2 = 25;
+    int m1 = 100;
+    int m2 = 75;
 
     int m = (m1 + 1) * (m2 + 1);
     int N = 20;
     double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
 
     // Create grid
     //Grid grid = create_test_grid(m1, m2);
@@ -809,13 +815,13 @@ void test_heston_call_shuffled() {
     // Initialize matrices
     heston_A0Storage_gpu A0(m1, m2);
     heston_A1Storage_gpu A1(m1, m2);
-    heston_A2Storage_gpu A2(m1, m2);  // Original A2
+    //heston_A2Storage_gpu A2(m1, m2);  // Original A2
     heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
 
     // Build matrices
     A0.build_matrix(grid, rho, sigma);
     A1.build_matrix(grid, rho, sigma, r_d, r_f);
-    A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
     A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
     // Time step size
@@ -841,12 +847,12 @@ void test_heston_call_shuffled() {
     // Build implicit matrices
     double theta_t = theta * delta_t;
     A1.build_implicit(theta, delta_t);
-    A2.build_implicit(theta, delta_t);
+    //A2.build_implicit(theta, delta_t);
     A2_shuf.build_implicit(theta, delta_t);
 
     // Solve using DO scheme
-    //for( int i = 0; i<5; i++){
-        DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2, A2_shuf, bounds, r_f, U);
+    //for( int i = 0; i<15; i++){
+        DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
     //}
 
     // Get result
@@ -947,7 +953,7 @@ void test_heston_call_shuffled_vary_m1() {
         for(int i = 0; i < num_runs; i++) {
             auto start = std::chrono::high_resolution_clock::now();
             
-            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2, A2_shuf, bounds, r_f, U);
+            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);//A2, A2_shuf, bounds, r_f, U);
             
             auto end = std::chrono::high_resolution_clock::now();
             double duration = std::chrono::duration<double>(end - start).count();
@@ -1020,6 +1026,209 @@ void test_shuffled_convergence() {
         K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
     );
     ConvergenceExporter::exportTimeStepConvergenceToCSV("do_scheme_shuffled_N", data_N);
+}
+
+// Function to compute American call price using DO scheme with shuffled A2
+void test_heston_american_call_shuffled() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = 100;
+
+    double V_0 = 0.04;
+
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 100;
+    int m2 = 75;
+
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 20;
+    double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
+
+    // Create grid
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    //heston_A2Storage_gpu A2(m1, m2);  // Original A2
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
+
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+
+    // Build boundary conditions
+    BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), m1 + 1));
+
+    // Initial condition
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j * (m1 + 1)) = std::max(grid.Vec_s[i] - K, 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+    // Solve using DO scheme
+    //for( int i = 0; i<15; i++){
+        DO_scheme_american_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
+    //}
+
+    // Get result
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+
+    // Find price at S_0, V_0
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    // Compare with reference price (from Python/Monte Carlo)
+    const double reference_price = 8.8948693600540167;
+    std::cout << std::setprecision(16) << option_price << std::endl;
+    std::cout << "Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
+    std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+
+    ResultsExporter::exportToCSV("american_shuffled_heston_do_scheme", grid, U);
+}
+
+//Tests that the lambda function is basically everywhere zero for a american call
+void test_lambda_american_call() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = 100.0;
+
+    double V_0 = 0.04;
+
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 50;
+    int m2 = 25;
+
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 20;
+    double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
+
+    // Create grid
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
+
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+
+    // Build boundary conditions
+    BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), m1 + 1));
+
+    // Initial condition
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j * (m1 + 1)) = std::max(grid.Vec_s[i] - K, 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+    std::vector<std::vector<double>> lambda_evolution(N + 1, std::vector<double>(m1 + 1, 0.0));
+
+    // Solve using DO scheme
+    DO_scheme_american_shuffle_with_lambda_tracking(
+        m, m1, m2, N, U_0, delta_t, theta,
+        A0, A1, A2_shuf, bounds, r_f,
+        V_0,  // Pass initial variance
+        U,
+        lambda_evolution);
+
+    // Write lambda evolution to CSV file
+    std::string output_file = "lambda_surface.csv";
+    std::ofstream outfile(output_file);
+    if(!outfile.is_open()) {
+        std::cerr << "Failed to open output file: " << output_file << std::endl;
+        return;
+    }
+
+    // Write metadata as comments
+    outfile << "# Lambda Surface Data\n";
+    outfile << "# Time steps: " << N << "\n";
+    outfile << "# Delta t: " << delta_t << "\n";
+    outfile << "# Total time: " << N * delta_t << "\n\n";
+
+    // Write header with actual stock prices
+    outfile << "time";
+    for(int i = 0; i <= m1; i++) {
+        outfile << "," << grid.Vec_s[i];  // Write actual stock price value
+    }
+    outfile << "\n";
+
+    // Write data
+    for(int n = 0; n <= N; n++) {
+        outfile << n * delta_t;  // Time point
+        for(int i = 0; i <= m1; i++) {
+            outfile << "," << lambda_evolution[n][i];
+        }
+        outfile << "\n";
+    }
+    outfile.close();
+
+    std::cout << "Lambda surface data exported to " << output_file << std::endl;
 }
 
 /*
@@ -1537,18 +1746,21 @@ void test_parallel_tridiagonal2() {
 void test_DO_scheme() {
     Kokkos::initialize();
         {
+        //First DO scheme tests. Here we have a "normal" A2 matrix with sequentially linked diagonals
         //test_parallel_tridiagonal2();
         //test_heston_call();
         //test_DO_m1_convergence();
         //test_all_convergence();
 
-        test_heston_call_shuffled();
+        //Tests where we shuffled the A2 direction to have independent diagonals
+        //test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
         //test_shuffled_convergence();
 
-        //has a bug in it, I dont think it is a bug, but rather bad numerics for the A2 matrix
-        //we need to account for oszillation. Will produce fourth diagonal at the lower half of 
-        //the matrix
+        //test_heston_american_call_shuffled();
+        test_lambda_american_call();
+
+        //Test for a different scheme. It has the same convergence as the DO scheme
         //test_CS_scheme_call();
         //test_CS_convergence();
         //test_CS_shuffled();

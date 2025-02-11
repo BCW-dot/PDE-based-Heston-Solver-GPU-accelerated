@@ -807,18 +807,19 @@ void test_basic_calibration(){
     // Current parameter set
     const double V_0 = 0.04;
     
-    /*
+    
     const double rho = -0.9;
-    const double sigma = 0.03;
+    const double sigma = 0.3;
     const double kappa = 1.5;
     const double eta = 0.04;
-    */
+    
    
-   
+   /*
     const double rho = 0.03;
     const double sigma = 0.02;
     const double kappa = 3.0;
     const double eta = 0.01;
+    */
     
     
     // Numerical parameters
@@ -836,7 +837,7 @@ void test_basic_calibration(){
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.3 + i;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.8 + i;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;

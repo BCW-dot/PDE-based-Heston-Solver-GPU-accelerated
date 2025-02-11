@@ -587,7 +587,8 @@ void test_parallel_DO_method() {
 
 /*
 
-This is a test for how we could compute the jacobian in parallel.
+This is a test for how we could compute the jacobian in parallel. It is calling a device callable 
+Do method
 
 */
 void test_deviceCallable_Do_solver() {

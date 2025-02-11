@@ -195,7 +195,6 @@ void DO_scheme_shuffle(const int m,
               const double theta,              
               heston_A0Storage_gpu& A0,        
               heston_A1Storage_gpu& A1,        
-              heston_A2Storage_gpu& A2,        // Keep original
               heston_A2_shuffled& A2_shuf,     // Add shuffled version
               const BoundaryConditions& bounds,
               const double r_f,                
@@ -209,7 +208,6 @@ void DO_scheme_shuffle(const int m,
     ViewType Y_1("Y_1", m);
     ViewType A0_result("A0_result", m);
     ViewType A1_result("A1_result", m);
-    ViewType A2_result("A2_result", m);
 
     ViewType Y_1_shuffled("Y_1_shuffled", m);
     ViewType U_next_shuffled("U_next_shuffled", m);
@@ -257,7 +255,6 @@ void DO_scheme_shuffle(const int m,
         
         A1.solve_implicit_parallel_v(Y_1, Y_0);
 
-        //A2.multiply_parallel_s_and_v(U, A2_result);
         shuffle_vector(U, U_shuffled, m1, m2);
         A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
         unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
@@ -269,19 +266,155 @@ void DO_scheme_shuffle(const int m,
             Y_1(i) = rhs;  // Reuse Y_1 to store RHS
         });
 
-        //A2.solve_implicit(U, Y_1);
         // Shuffle input
         shuffle_vector(Y_1, Y_1_shuffled, m1, m2);
-        
         // Solve with shuffled A2
         A2_shuf.solve_implicit(U_next_shuffled, Y_1_shuffled);
-        
         // Unshuffle result back to U
         unshuffle_vector(U_next_shuffled, U, m1, m2);
     }
 
     auto t_end = timer::now();
     std::cout << "DO time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+}
+
+
+template<class ViewType>
+void DO_scheme_american_shuffle(
+    const int m,                    
+    const int m1,                    
+    const int m2,                    
+    const int N,                     
+    const ViewType& U_0,             
+    const double delta_t,            
+    const double theta,              
+    heston_A0Storage_gpu& A0,        
+    heston_A1Storage_gpu& A1,                
+    heston_A2_shuffled& A2_shuf,     
+    const BoundaryConditions& bounds,
+    const double r_f,                
+    ViewType& U) {                   
+    
+    // Initialize result with initial condition
+    Kokkos::deep_copy(U, U_0);
+
+    // Create persistent workspace vectors
+    ViewType Y_0("Y_0", m);
+    ViewType Y_1("Y_1", m);
+    ViewType A0_result("A0_result", m);
+    ViewType A1_result("A1_result", m);
+
+    ViewType Y_1_shuffled("Y_1_shuffled", m);
+    ViewType U_next_shuffled("U_next_shuffled", m);
+    ViewType U_shuffled("U_shuffled", m);
+    ViewType A2_result_shuffled("A2_result_shuffled", m);
+    ViewType A2_result_unshuf("A2_result_unshuf", m);
+
+    // Create lambda workspace for American option
+    ViewType lambda_bar("lambda_bar", m);
+    Kokkos::deep_copy(lambda_bar, 0.0);  // Initialize lambda to zero
+
+    // Get boundary vectors
+    auto b = bounds.get_b();
+    auto b1 = bounds.get_b1();
+    auto b2 = bounds.get_b2();
+
+    const int buffer_size = 1;  // Buffer size for boundary suppression
+
+    using timer = std::chrono::high_resolution_clock;
+    auto t_start = timer::now();
+
+    // Main time stepping loop
+    for (int n = 1; n <= N; n++) {
+        //need to zero out A0
+        ViewType A0_result("A0_result", m);
+
+        // Step 1: Matrix multiplications
+        A0.multiply_parallel_s_and_v(U, A0_result);
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        // Y_0 computation now includes lambda contribution
+        Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor = std::exp(r_f * delta_t * (n-1));
+            Y_0(i) = U(i) + delta_t * (A0_result(i) + A1_result(i) + 
+                        A2_result_unshuf(i) + b(i) * exp_factor + 
+                        lambda_bar(i));  // Add lambda contribution
+        });
+
+        // A1 step
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_0(i) + theta * delta_t * (b1(i) * exp_factor_n - 
+                        (A1_result(i) + b1(i) * exp_factor_nm1));
+            Y_0(i) = rhs;
+        });
+        
+        A1.solve_implicit_parallel_v(Y_1, Y_0);
+
+        // A2 step
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_n - 
+                        (A2_result_unshuf(i) + b2(i) * exp_factor_nm1));
+            Y_1(i) = rhs;
+        });
+
+        shuffle_vector(Y_1, Y_1_shuffled, m1, m2);
+        A2_shuf.solve_implicit(U_next_shuffled, Y_1_shuffled);
+        unshuffle_vector(U_next_shuffled, U, m1, m2);
+
+        // American option early exercise check and lambda update
+        Kokkos::parallel_for("early_exercise_check", m, KOKKOS_LAMBDA(const int i) {
+            // Apply early exercise condition
+            const double U_bar = U(i);
+            U(i) = Kokkos::max(U_bar - delta_t * lambda_bar(i), U_0(i));
+
+            // Update lambda multiplier
+            lambda_bar(i) = Kokkos::max(0.0, lambda_bar(i) + (U_0(i) - U_bar) / delta_t);
+
+            // Set lambda to zero at S_max for all variance levels
+            // Every (m1+1)th entry starting at index m1 is an S_max entry
+            if(i % (m1 + 1) == m1) {  // This hits exactly S_max entries at all variance levels
+                lambda_bar(i) = 0.0;
+            }
+        });
+        
+        
+        //This is slower than the above version, but maybe "easier" to understand
+        //they do the same of course 
+        // First do early exercise check for all points
+        /*
+        Kokkos::parallel_for("early_exercise_check", m, KOKKOS_LAMBDA(const int i) {
+            const double U_bar = U(i);
+            U(i) = Kokkos::max(U_bar - delta_t * lambda_bar(i), U_0(i));
+            lambda_bar(i) = Kokkos::max(0.0, lambda_bar(i) + (U_0(i) - U_bar) / delta_t);
+        });
+
+        // Then zero out lambda at S_max for all variance levels
+        // This loop only hits the S_max entries
+        Kokkos::parallel_for("zero_lambda_at_smax", m2 + 1, KOKKOS_LAMBDA(const int j) {
+            const int smax_index = m1 + j * (m1 + 1);  // Index of S_max at variance level j
+            lambda_bar(smax_index) = 0.0;
+        });
+        */
+    }
+
+    auto t_end = timer::now();
+    std::cout << "DO American time: "
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
 }
@@ -611,6 +744,153 @@ void CS_scheme_shuffled(const int m,
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
 }
+
+
+/*
+
+This is a hardocded test for the lambda surface. It generates a csv file where we plot lambda against time and stock
+for a specific variance level
+
+*/
+
+template<class ViewType>
+void DO_scheme_american_shuffle_with_lambda_tracking(
+    const int m, const int m1, const int m2, const int N,                     
+    const ViewType& U_0, const double delta_t, const double theta,              
+    heston_A0Storage_gpu& A0, 
+    heston_A1Storage_gpu& A1,        
+    heston_A2_shuffled& A2_shuf,     
+    const BoundaryConditions& bounds, const double r_f,
+    const double V_0,  // Add V_0 to help find variance level                
+    ViewType& U,
+    std::vector<std::vector<double>>& lambda_evolution) {                   
+    
+    // Initialize result with initial condition
+    Kokkos::deep_copy(U, U_0);
+
+    // Create persistent workspace vectors
+    ViewType Y_0("Y_0", m);
+    ViewType Y_1("Y_1", m);
+    ViewType A0_result("A0_result", m);
+    ViewType A1_result("A1_result", m);
+
+    ViewType Y_1_shuffled("Y_1_shuffled", m);
+    ViewType U_next_shuffled("U_next_shuffled", m);
+    ViewType U_shuffled("U_shuffled", m);
+    ViewType A2_result_shuffled("A2_result_shuffled", m);
+    ViewType A2_result_unshuf("A2_result_unshuf", m);
+
+    // Create lambda workspace for American option
+    ViewType lambda_bar("lambda_bar", m);
+    Kokkos::deep_copy(lambda_bar, 0.0);  // Initialize lambda to zero
+
+    // Get boundary vectors
+    auto b = bounds.get_b();
+    auto b1 = bounds.get_b1();
+    auto b2 = bounds.get_b2();
+
+    // Create storage for lambda evolution at fixed variance
+    const int v_index = std::floor(V_0 * (m2 + 1) / 5.0);  // Assuming V_max = 5.0
+
+    // Store initial lambda values
+    auto h_lambda = Kokkos::create_mirror_view(lambda_bar);
+    Kokkos::deep_copy(h_lambda, lambda_bar);
+    for(int i = 0; i <= m1; i++) {
+        lambda_evolution[0][i] = h_lambda[i + v_index * (m1 + 1)];
+    }
+
+    using timer = std::chrono::high_resolution_clock;
+    auto t_start = timer::now();
+
+    // Main time stepping loop
+    for (int n = 1; n <= N; n++) {
+        //need to zero out A0
+        ViewType A0_result("A0_result", m);
+
+        // Step 1: Matrix multiplications
+        A0.multiply_parallel_s_and_v(U, A0_result);
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        // Y_0 computation now includes lambda contribution
+        Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor = std::exp(r_f * delta_t * (n-1));
+            Y_0(i) = U(i) + delta_t * (A0_result(i) + A1_result(i) + 
+                        A2_result_unshuf(i) + b(i) * exp_factor + 
+                        lambda_bar(i));  // Add lambda contribution
+        });
+
+        // A1 step
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_0(i) + theta * delta_t * (b1(i) * exp_factor_n - 
+                        (A1_result(i) + b1(i) * exp_factor_nm1));
+            Y_0(i) = rhs;
+        });
+        
+        A1.solve_implicit_parallel_v(Y_1, Y_0);
+
+        // A2 step
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_n - 
+                        (A2_result_unshuf(i) + b2(i) * exp_factor_nm1));
+            Y_1(i) = rhs;
+        });
+
+        shuffle_vector(Y_1, Y_1_shuffled, m1, m2);
+        A2_shuf.solve_implicit(U_next_shuffled, Y_1_shuffled);
+        unshuffle_vector(U_next_shuffled, U, m1, m2);
+
+        // American option early exercise check and lambda update
+        Kokkos::parallel_for("early_exercise_check", m, KOKKOS_LAMBDA(const int i) {
+            // Apply early exercise condition
+            const double U_bar = U(i);
+            U(i) = Kokkos::max(U_bar - delta_t * lambda_bar(i), U_0(i));
+
+            // Update lambda multiplier
+            lambda_bar(i) = Kokkos::max(0.0, lambda_bar(i) + (U_0(i) - U_bar) / delta_t);
+
+            // Set lambda to zero at S_max for all variance levels
+            // Every (m1+1)th entry starting at index m1 is an S_max entry
+            if(i % (m1 + 1) == m1) {  // This hits exactly S_max entries at all variance levels
+                lambda_bar(i) = 0.0;
+            }
+        });
+
+        /*
+        Kokkos::parallel_for("zero_lambda_at_smax", m2 + 1, KOKKOS_LAMBDA(const int j) {
+            const int smax_index = m1 + j * (m1 + 1);  // Index of S_max at variance level j
+            lambda_bar(smax_index) = 0.0;
+        });
+        */
+
+        Kokkos::deep_copy(h_lambda, lambda_bar);
+        for(int i = 0; i <= m1; i++) {
+            lambda_evolution[n][i] = h_lambda[i + v_index * (m1 + 1)];
+        }
+        
+    }
+
+    auto t_end = timer::now();
+    std::cout << "DO American time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+}
+
+
+
 
 
 void test_DO_scheme();
