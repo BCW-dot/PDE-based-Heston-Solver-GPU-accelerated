@@ -833,11 +833,11 @@ void test_basic_calibration(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 20;
+    const int num_strikes = 30;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.8 + i;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.95 + i * 1.8;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
