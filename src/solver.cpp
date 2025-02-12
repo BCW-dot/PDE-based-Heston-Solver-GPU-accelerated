@@ -1239,8 +1239,8 @@ void test_lambda_american_call() {
 //Test which computes a call price with a divident paying underlying
 void test_heston_divident_call_shuffled() {
     // Test parameters
-    double K = 100.0;
-    double S_0 = 100;
+    double K = 91.0;
+    double S_0 = 100.0;
 
     double V_0 = 0.04;
 
@@ -1258,7 +1258,7 @@ void test_heston_divident_call_shuffled() {
     int m2 = 25;
 
     int m = (m1 + 1) * (m2 + 1);
-    int N = 30;
+    int N = 20;
     double theta = 0.8;
 
     std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
