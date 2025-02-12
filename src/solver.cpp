@@ -2289,10 +2289,10 @@ void test_DO_scheme() {
         //test_heston_american_call_shuffled();
         //test_lambda_american_call();
 
-        //test_heston_divident_call_shuffled();
+        test_heston_divident_call_shuffled();
         //test_heston_divident_call_price_surface();
 
-        test_heston_american_dividend_call_shuffled();
+        //test_heston_american_dividend_call_shuffled();
         //test_lambda_american_dividend_call();
 
         /*

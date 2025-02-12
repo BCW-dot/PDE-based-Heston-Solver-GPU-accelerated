@@ -271,5 +271,321 @@ void device_DO_timestepping(
 }
 
 
+/*
+
+Device callable american solver
+
+*/
+template<class Device, class ViewType>  // Add ViewType template parameter
+KOKKOS_FUNCTION 
+void device_DO_timestepping_american(
+    // Grid dimensions
+    const int m1,
+    const int m2,
+    // Time discretization
+    const int N,
+    const double delta_t,
+    const double theta,
+    const double r_f,
+    // Problem components
+    Device_A0_heston<Device>& A0,
+    Device_A1_heston<Device>& A1,
+    Device_A2_shuffled_heston<Device>& A2,
+    const Device_BoundaryConditions<Device>& bounds,
+    // Workspace views for this instance - now using ViewType
+    ViewType& U_i,
+    ViewType& Y_0_i,
+    ViewType& Y_1_i,
+    ViewType& A0_result_i,
+    ViewType& A1_result_i,
+    ViewType& A2_result_unshuf_i,
+    ViewType& U_shuffled_i,
+    ViewType& Y_1_shuffled_i,
+    ViewType& A2_result_shuffled_i,
+    ViewType& U_next_shuffled_i,
+    //american specifics
+    ViewType& lambda_bar_i,
+    const ViewType& U_0_i,
+    // Team handle
+    const typename Kokkos::TeamPolicy<>::member_type& team
+) {
+    const int total_size = (m1+1)*(m2+1);
+
+     //Need to reset the lambda function to zero 
+     Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+        [&](const int i) {
+        lambda_bar_i(i) = 0;
+    });
+
+    for(int n = 1; n <= N; n++) {
+        // Step 1: Y0 computation
+        A0.multiply_parallel_s_and_v(U_i, A0_result_i, team);
+        A1.multiply_parallel_v(U_i, A1_result_i, team);
+        
+        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
+        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
+        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
+
+        // Y0 computation with boundary terms
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size), 
+            [&](const int i) {
+                double exp_factor = std::exp(r_f * delta_t * (n-1));
+                Y_0_i(i) = U_i(i) + delta_t * (A0_result_i(i) + A1_result_i(i) + 
+                          A2_result_unshuf_i(i) + bounds.b_(i) * exp_factor + 
+                          lambda_bar_i(i));  // Add lambda contribution
+            });
+
+        // Step 2: A1 implicit solve
+        A1.multiply_parallel_v(U_i, A1_result_i, team);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+            [&](const int i) {
+                double exp_factor_n = std::exp(r_f * delta_t * n);
+                double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+                Y_0_i(i) = Y_0_i(i) + theta * delta_t * (bounds.b1_(i) * exp_factor_n - 
+                          (A1_result_i(i) + bounds.b1_(i) * exp_factor_nm1));
+            });
+        A1.solve_implicit_parallel_v(Y_1_i, Y_0_i, team);
+
+        // Step 3: A2 shuffled implicit solve
+        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
+        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
+        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
+
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+            [&](const int i) {
+                double exp_factor_n = std::exp(r_f * delta_t * n);
+                double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+                Y_1_i(i) = Y_1_i(i) + theta * delta_t * (bounds.b2_(i) * exp_factor_n - 
+                          (A2_result_unshuf_i(i) + bounds.b2_(i) * exp_factor_nm1));
+            });
+
+        device_shuffle_vector(Y_1_i, Y_1_shuffled_i, m1, m2, team);
+        A2.solve_implicit_parallel_s(U_next_shuffled_i, Y_1_shuffled_i, team);
+        device_unshuffle_vector(U_next_shuffled_i, U_i, m1, m2, team);
+
+        // American option early exercise check and lambda update
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+            [&](const int i) {
+            // Apply early exercise condition
+            const double U_bar = U_i(i);
+            U_i(i) = Kokkos::max(U_bar - delta_t * lambda_bar_i(i), U_0_i(i));
+
+            // Update lambda multiplier
+            lambda_bar_i(i) = Kokkos::max(0.0, lambda_bar_i(i) + (U_0_i(i) - U_bar) / delta_t);
+
+            // Set lambda to zero at S_max for all variance levels
+            // Every (m1+1)th entry starting at index m1 is an S_max entry
+            if(i % (m1 + 1) == m1) {  // This hits exactly S_max entries at all variance levels
+                lambda_bar_i(i) = 0.0;
+            }
+        });
+    }
+}
+
+
+/*
+
+Device callable american solver
+
+*/
+template<class Device, class ViewType>  // Add ViewType template parameter
+KOKKOS_FUNCTION 
+void device_DO_timestepping_dividend(
+    // Grid dimensions
+    const int m1,
+    const int m2,
+    // Time discretization
+    const int N,
+    const double delta_t,
+    const double theta,
+    const double r_f,
+    // Problem components
+    Device_A0_heston<Device>& A0,
+    Device_A1_heston<Device>& A1,
+    Device_A2_shuffled_heston<Device>& A2,
+    const Device_BoundaryConditions<Device>& bounds,
+    // Workspace views for this instance - now using ViewType
+    ViewType& U_i,
+    ViewType& Y_0_i,
+    ViewType& Y_1_i,
+    ViewType& A0_result_i,
+    ViewType& A1_result_i,
+    ViewType& A2_result_unshuf_i,
+    ViewType& U_shuffled_i,
+    ViewType& Y_1_shuffled_i,
+    ViewType& A2_result_shuffled_i,
+    ViewType& U_next_shuffled_i,
+    //dividend specifics
+    const int num_dividends,                        // Number of dividends
+    const Kokkos::View<double*>& dividend_dates,    // Device view of dates
+    const Kokkos::View<double*>& dividend_amounts,  // Device view of amounts
+    const Kokkos::View<double*>& dividend_percentages,  // Device view of percentages
+    const ViewType& device_Vec_s_i,                         // Stock price grid
+    ViewType& U_temp_i,  // Temporary storage passed in from workspace
+    // Team handle
+    const typename Kokkos::TeamPolicy<>::member_type& team
+) {
+    const int total_size = (m1+1)*(m2+1);
+
+    
+    // Create shared team memory for tracking dividend processing
+    // This will help us keep track of which dividends have been processed
+    //typename Kokkos::TeamPolicy<>::member_type::scratch_memory_space shmem = team.team_scratch(0);
+    //Kokkos::View<int*, typename Kokkos::TeamPolicy<>::member_type::scratch_memory_space> processed_dividends(shmem, num_dividends);
+
+    /*
+    for(int n = 1; n <= N; n++) {
+        double t = n * delta_t;
+        
+        
+        // Check for dividends - only one thread per team checks
+        if(team.team_rank() == 0) {
+            for(int div_idx = 0; div_idx < num_dividends; div_idx++) {
+                // Check if we're in the dividend window for this dividend
+                if(t <= dividend_dates[div_idx] && dividend_dates[div_idx] < (n+1) * delta_t) {
+                    //copy existing solution into temp variable
+                    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+                        [&](const int i) {
+                            U_temp_i(i) = U_i(i);
+                    });
+                    //perfom the dividend adjustemnt
+                    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2+1),
+                        [&](const int j) {
+                            const int offset = j * (m1 + 1);
+
+                            for(int i = 0; i <= m1; i++) {
+                                const double old_s = device_Vec_s_i(i);
+                                const double new_s = old_s * (1.0 - dividend_percentages[div_idx]) 
+                                                   - dividend_amounts[div_idx];
+                                
+                                if(new_s > 0) {
+                                    // Binary search for interpolation point
+                                    int low = 0;
+                                    int high = m1;
+                                    
+                                    while(low < high - 1) {
+                                        const int mid = (low + high) / 2;
+                                        if(device_Vec_s_i(mid) <= new_s) {
+                                            low = mid;
+                                        } else {
+                                            high = mid;
+                                        }
+                                    }
+
+                                    if(low < m1) {
+                                        const double s_low = device_Vec_s_i(low);
+                                        const double s_high = device_Vec_s_i(low + 1);
+                                        const double weight = (new_s - s_low) / (s_high - s_low);
+                                        
+                                        const double val_low = U_temp_i(offset + low);
+                                        const double val_high = U_temp_i(offset + low + 1);
+                                        U_i(offset + i) = (1.0 - weight) * val_low + weight * val_high;
+                                    } else {
+                                        U_i(offset + i) = U_temp_i(offset + m1);
+                                    }
+                                }
+                                else {
+                                    U_i(offset + i) = 0.0;
+                                }
+                            }
+                    });
+                }
+            }
+        }
+        team.team_barrier();
+        
+
+        // Step 1: Y0 computation
+        A0.multiply_parallel_s_and_v(U_i, A0_result_i, team);
+        A1.multiply_parallel_v(U_i, A1_result_i, team);
+        
+        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
+        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
+        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
+
+        // Y0 computation with boundary terms
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size), 
+            [&](const int i) {
+                double exp_factor = std::exp(r_f * delta_t * (n-1));
+                Y_0_i(i) = U_i(i) + delta_t * (A0_result_i(i) + A1_result_i(i) + 
+                          A2_result_unshuf_i(i) + bounds.b_(i) * exp_factor);
+            });
+
+        // Step 2: A1 implicit solve
+        A1.multiply_parallel_v(U_i, A1_result_i, team);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+            [&](const int i) {
+                double exp_factor_n = std::exp(r_f * delta_t * n);
+                double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+                Y_0_i(i) = Y_0_i(i) + theta * delta_t * (bounds.b1_(i) * exp_factor_n - 
+                          (A1_result_i(i) + bounds.b1_(i) * exp_factor_nm1));
+            });
+        A1.solve_implicit_parallel_v(Y_1_i, Y_0_i, team);
+
+        // Step 3: A2 shuffled implicit solve
+        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
+        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
+        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
+
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+            [&](const int i) {
+                double exp_factor_n = std::exp(r_f * delta_t * n);
+                double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+                Y_1_i(i) = Y_1_i(i) + theta * delta_t * (bounds.b2_(i) * exp_factor_n - 
+                          (A2_result_unshuf_i(i) + bounds.b2_(i) * exp_factor_nm1));
+            });
+
+        device_shuffle_vector(Y_1_i, Y_1_shuffled_i, m1, m2, team);
+        A2.solve_implicit_parallel_s(U_next_shuffled_i, Y_1_shuffled_i, team);
+        device_unshuffle_vector(U_next_shuffled_i, U_i, m1, m2, team);
+    }
+    */
+   for(int n = 1; n <= N; n++) {
+        // Step 1: Y0 computation
+        A0.multiply_parallel_s_and_v(U_i, A0_result_i, team);
+        A1.multiply_parallel_v(U_i, A1_result_i, team);
+        
+        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
+        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
+        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
+
+        // Y0 computation with boundary terms
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size), 
+            [&](const int i) {
+                double exp_factor = std::exp(r_f * delta_t * (n-1));
+                Y_0_i(i) = U_i(i) + delta_t * (A0_result_i(i) + A1_result_i(i) + 
+                        A2_result_unshuf_i(i) + bounds.b_(i) * exp_factor);
+            });
+
+        // Step 2: A1 implicit solve
+        A1.multiply_parallel_v(U_i, A1_result_i, team);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+            [&](const int i) {
+                double exp_factor_n = std::exp(r_f * delta_t * n);
+                double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+                Y_0_i(i) = Y_0_i(i) + theta * delta_t * (bounds.b1_(i) * exp_factor_n - 
+                        (A1_result_i(i) + bounds.b1_(i) * exp_factor_nm1));
+            });
+        A1.solve_implicit_parallel_v(Y_1_i, Y_0_i, team);
+
+        // Step 3: A2 shuffled implicit solve
+        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
+        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
+        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
+
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+            [&](const int i) {
+                double exp_factor_n = std::exp(r_f * delta_t * n);
+                double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+                Y_1_i(i) = Y_1_i(i) + theta * delta_t * (bounds.b2_(i) * exp_factor_n - 
+                        (A2_result_unshuf_i(i) + bounds.b2_(i) * exp_factor_nm1));
+            });
+
+        device_shuffle_vector(Y_1_i, Y_1_shuffled_i, m1, m2, team);
+        A2.solve_implicit_parallel_s(U_next_shuffled_i, Y_1_shuffled_i, team);
+        device_unshuffle_vector(U_next_shuffled_i, U_i, m1, m2, team);
+    }
+}
+
 
 void test_device_class();

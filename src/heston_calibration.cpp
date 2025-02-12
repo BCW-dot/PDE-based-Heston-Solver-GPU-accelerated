@@ -499,6 +499,7 @@ void compute_base_prices(
 
             GridViews grid_i = deviceGrids(instance);
 
+            //need to rebuild the Variance direction, since we are chagning V0 throughout the computation
             grid_i.rebuild_variance_views(V_0, 5.0, 5.0/500, team);
             
             bounds_d(instance).initialize(grid_i, team);
