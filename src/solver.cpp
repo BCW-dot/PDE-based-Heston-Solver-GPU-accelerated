@@ -1239,7 +1239,7 @@ void test_lambda_american_call() {
 //Test which computes a call price with a divident paying underlying
 void test_heston_divident_call_shuffled() {
     // Test parameters
-    double K = 91.0;
+    double K = 95.0;
     double S_0 = 100.0;
 
     double V_0 = 0.04;
@@ -1347,7 +1347,7 @@ void test_heston_divident_call_shuffled() {
     usual test parameters and 
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
     std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
     */
     const double reference_price = 3.839290124997349;
 
@@ -1515,7 +1515,7 @@ void test_heston_divident_call_price_surface() {
 //this Test computes the call price of an american option on a stock which pays dividends
 void test_heston_american_dividend_call_shuffled() {
     // Test parameters
-    double K = 100.0;
+    double K = 95.0;
     double S_0 = 100.0;
 
     double V_0 = 0.04;
@@ -2289,10 +2289,10 @@ void test_DO_scheme() {
         //test_heston_american_call_shuffled();
         //test_lambda_american_call();
 
-        test_heston_divident_call_shuffled();
+        //test_heston_divident_call_shuffled();
         //test_heston_divident_call_price_surface();
 
-        //test_heston_american_dividend_call_shuffled();
+        test_heston_american_dividend_call_shuffled();
         //test_lambda_american_dividend_call();
 
         /*
