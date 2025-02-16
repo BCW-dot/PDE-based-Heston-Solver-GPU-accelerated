@@ -935,7 +935,7 @@ void test_deviceCallable_Do_solver_american() {
     auto t_start = timer::now();
 
     // Main kernel launch with modified internals
-    Kokkos::parallel_for("DO_scheme", policy,
+    Kokkos::parallel_for("DO_scheme_american", policy,
         KOKKOS_LAMBDA(const team_policy::member_type& team) {
             const int instance = team.league_rank();
             
@@ -1305,7 +1305,7 @@ void test_deviceCallable_Do_solver_american_dividend() {
     const int m1 = 50;
     const int m2 = 25;
 
-    const int nInstances = 10;
+    const int nInstances = 50;
 
     //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
     //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
@@ -1552,8 +1552,9 @@ First for loop test for jacobian
 
 */
 //works! Only v0 will need to do a "trick" to get the FD approximation
-//Best method so far in terms of speed!
-void test_jacobian_computation() {
+//Best method so far in terms of speed! This is computing the "jacobian" matrix 
+//for one Levenberg marquard step. 
+void test_pertubation_computation() {
     using timer = std::chrono::high_resolution_clock;
     using Device = Kokkos::DefaultExecutionSpace;
 
@@ -2630,10 +2631,10 @@ void test_device_class() {
     //test_deviceCallable_Do_solver();
     //test_deviceCallable_Do_solver_american();
     //test_deviceCallable_Do_solver_dividend();
-    test_deviceCallable_Do_solver_american_dividend();
+    //test_deviceCallable_Do_solver_american_dividend();
 
 
-    //test_jacobian_computation();
+    test_pertubation_computation();
     //test_heston_jacobian();
     //test_sequential_J();
   }
