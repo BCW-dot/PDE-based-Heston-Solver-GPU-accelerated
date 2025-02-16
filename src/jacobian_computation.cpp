@@ -676,11 +676,11 @@ void compute_base_prices_american(
     team_policy policy(num_strikes, Kokkos::AUTO);
 
     // Main Jacobian computation kernel 
-    Kokkos::parallel_for("American_Base_Price", policy,
+    Kokkos::parallel_for("Jacobian_computation", policy,
         KOKKOS_LAMBDA(const team_policy::member_type& team) {
             const int instance = team.league_rank();
             
-            // Get subviews from workspace
+            // Setup workspace views
             auto U_i = Kokkos::subview(workspace.U, instance, Kokkos::ALL);
             auto Y_0_i = Kokkos::subview(workspace.Y_0, instance, Kokkos::ALL);
             auto Y_1_i = Kokkos::subview(workspace.Y_1, instance, Kokkos::ALL);
@@ -693,22 +693,22 @@ void compute_base_prices_american(
             auto A2_result_shuffled_i = Kokkos::subview(workspace.A2_result_shuffled, instance, Kokkos::ALL);
             auto U_next_shuffled_i = Kokkos::subview(workspace.U_next_shuffled, instance, Kokkos::ALL);
 
-            // Get subviews for American option specifics
-            auto U_0_i = Kokkos::subview(U_0, instance, Kokkos::ALL);
+            auto U_0_i = Kokkos::subview(U_0, instance, Kokkos::ALL);  // Get initial condition
+            //american specific
             auto lambda_bar_i = Kokkos::subview(workspace.lambda_bar, instance, Kokkos::ALL);
 
-            //Initialize Grid views
             GridViews grid_i = deviceGrids(instance);
+
+            grid_i.rebuild_variance_views(V_0, 5.0, 5.0/500, team);
             
-            // Initialize boundaries 
             bounds_d(instance).initialize(grid_i, team);
             auto bounds = bounds_d(instance);
             
-            // Build matrices
             A0_solvers(instance).build_matrix(grid_i, rho, sigma, team);
             A1_solvers(instance).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
             A2_solvers(instance).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
 
+            
             // Call device timestepping
             device_DO_timestepping_american<Device, decltype(U_i)>(
                 m1, m2, N, delta_t, theta, r_f,
@@ -740,7 +740,7 @@ void compute_base_prices_american(
         });
         Kokkos::fence();
 }
-
+  
 
 
 /*

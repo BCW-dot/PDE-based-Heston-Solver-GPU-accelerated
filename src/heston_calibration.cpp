@@ -62,11 +62,11 @@ void test_calibration_european(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 30;
+    const int num_strikes = 20;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.95 + i * 1.8;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.95 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -539,11 +539,11 @@ void test_calibration_american(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 20;
+    const int num_strikes = 60;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.4 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.55 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -705,6 +705,7 @@ void test_calibration_american(){
         Kokkos::deep_copy(workspace.U, U_0); 
         // Compute Jacobian and base prices with current parameters
 
+        
         compute_jacobian_american(
             S_0, current_v0, T,
             r_d, r_f,
@@ -717,7 +718,22 @@ void test_calibration_american(){
             J, base_prices,
             eps
         );
+        
 
+        /*
+        compute_jacobian(
+            S_0, current_v0, T,
+            r_d, r_f,
+            current_rho, current_sigma, current_kappa, current_eta,
+            m1, m2, total_size, N, theta, delta_t,
+            num_strikes,
+            A0_solvers, A1_solvers, A2_solvers,
+            bounds_d, deviceGrids,
+            U_0, workspace,
+            J, base_prices,
+            eps
+        );
+        */
         
         //printing Jacobian
         /*
@@ -842,6 +858,7 @@ void test_calibration_american(){
         Kokkos::deep_copy(workspace.U, U_0); // reset init condition
         //Rebuilding the variance direction for new_v0 is done inside the kernel
 
+        
         compute_base_prices_american(S_0, new_v0, T,
                 r_d, r_f,
                 new_rho, new_sigma, new_kappa, new_eta,
@@ -852,7 +869,7 @@ void test_calibration_american(){
                 workspace,
                 base_prices
             );
-            
+        
 
         //print the new base prices
         /*
@@ -1019,23 +1036,23 @@ void test_calibration_dividends(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 30;
+    const int num_strikes = 10;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.4 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.95 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
-    const int max_iter = 7;
+    const int max_iter = 15;
     const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
     //Handling dividend host device transfer
     //{0.0, 0.0, 0.0, 0.0}
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
-    std::vector<double> dividend_amounts = {0.5, 0.5, 0.5, 0.5};//{0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.01, 0.01, 0.01, 0.01};//{0.02, 0.02, 0.02, 0.02};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
 
     // On host side, create views for dividend data
     Kokkos::View<double*> d_dividend_dates("dividend_dates", dividend_dates.size());
@@ -1532,11 +1549,11 @@ void test_calibration_american_dividends(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 30;
+    const int num_strikes = 20;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.4 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.95 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -1547,8 +1564,8 @@ void test_calibration_american_dividends(){
     //Handling dividend host device transfer
     //{0.0, 0.0, 0.0, 0.0}
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
-    std::vector<double> dividend_amounts = {0.5, 0.5, 0.5, 0.5};//{0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.01, 0.01, 0.01, 0.01};//{0.02, 0.02, 0.02, 0.02};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
 
     // On host side, create views for dividend data
     Kokkos::View<double*> d_dividend_dates("dividend_dates", dividend_dates.size());
@@ -2011,8 +2028,8 @@ void test_heston_calibration(){
   {
     //test_calibration_european();
     //test_calibration_american();
-    //test_calibration_dividends();
-    test_calibration_american_dividends();
+    test_calibration_dividends();
+    //test_calibration_american_dividends();
   }
   Kokkos::finalize();
  

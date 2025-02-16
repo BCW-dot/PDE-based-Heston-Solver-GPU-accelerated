@@ -2634,7 +2634,7 @@ void test_device_class() {
     //test_deviceCallable_Do_solver_american_dividend();
 
 
-    test_pertubation_computation();
+    //test_pertubation_computation();
     //test_heston_jacobian();
     //test_sequential_J();
   }

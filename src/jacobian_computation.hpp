@@ -97,7 +97,6 @@ void compute_jacobian_american(
 
 void compute_base_prices_american(
     // Market/model parameters
-    // Market/model parameters
     const double S_0, const double V_0, const double T,
     const double r_d, const double r_f,
     const double rho, const double sigma, const double kappa, const double eta,
