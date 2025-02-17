@@ -1049,7 +1049,7 @@ void test_deviceCallable_Do_solver_dividend() {
     const int m1 = 50;
     const int m2 = 25;
 
-    const int nInstances = 10;
+    const int nInstances = 5;
 
     //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
     //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
@@ -1152,8 +1152,8 @@ void test_deviceCallable_Do_solver_dividend() {
     //Handling dividend host device transfer
     //{0.0, 0.0, 0.0, 0.0}
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
-    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};//{0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};//{0.02, 0.02, 0.02, 0.02};
 
     // On host side, create views for dividend data
     Kokkos::View<double*> d_dividend_dates("dividend_dates", dividend_dates.size());
@@ -1246,7 +1246,7 @@ void test_deviceCallable_Do_solver_dividend() {
     auto h_U = Kokkos::create_mirror_view(workspace.U);
     Kokkos::deep_copy(h_U, workspace.U);
 
-    for(int inst = 0; inst < min(2,nInstances); ++inst) {
+    for(int inst = 0; inst < min(3,nInstances); ++inst) {
         // Create host mirrors for the grid views
         auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_s);
         auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_v);
@@ -2630,7 +2630,7 @@ void test_device_class() {
 
     //test_deviceCallable_Do_solver();
     //test_deviceCallable_Do_solver_american();
-    //test_deviceCallable_Do_solver_dividend();
+    test_deviceCallable_Do_solver_dividend();
     //test_deviceCallable_Do_solver_american_dividend();
 
 

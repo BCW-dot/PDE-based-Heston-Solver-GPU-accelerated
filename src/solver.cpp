@@ -1239,7 +1239,7 @@ void test_lambda_american_call() {
 //Test which computes a call price with a divident paying underlying
 void test_heston_divident_call_shuffled() {
     // Test parameters
-    double K = 95.0;
+    double K = 100.0;
     double S_0 = 100.0;
 
     double V_0 = 0.04;
@@ -2289,11 +2289,11 @@ void test_DO_scheme() {
         //test_heston_american_call_shuffled();
         //test_lambda_american_call();
 
-        //test_heston_divident_call_shuffled();
+        test_heston_divident_call_shuffled();
         //test_heston_divident_call_price_surface();
 
         //test_heston_american_dividend_call_shuffled();
-        test_lambda_american_dividend_call();
+        //test_lambda_american_dividend_call();
 
         /*
 

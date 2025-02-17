@@ -425,8 +425,190 @@ void device_DO_timestepping_dividend(
     // Team handle
     const typename Kokkos::TeamPolicy<>::member_type& team
 ) { 
+    const int total_size = (m1+1)*(m2+1);
+int current_div_idx = 0;
 
-    //This works, but is sequential
+for(int n = 1; n <= N; n++) {
+    double t = n * delta_t;
+
+    // One-thread logic to check for dividend
+    int dividend_int = 0;
+    if (team.team_rank() == 0) {
+        // Use exactly the same condition as sequential version
+        dividend_int = (current_div_idx < num_dividends && 
+                       t <= dividend_dates(current_div_idx) && 
+                       dividend_dates(current_div_idx) < (n+1) * delta_t) ? 1 : 0;
+    }
+    // Broadcast the decision to all threads
+    team.team_broadcast(dividend_int, 0);
+    team.team_barrier();
+
+    if(dividend_int) {
+        // First, parallel copy of current solution
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+        [&](const int i) {
+            U_temp_i(i) = U_i(i);
+        });
+        team.team_barrier();
+
+        // Get dividend parameters
+        const double div_amount = dividend_amounts(current_div_idx);
+        const double div_percentage = dividend_percentages(current_div_idx);
+
+        // Process dividend adjustment in parallel over variance levels
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2+1),
+            [&](const int j) {
+                const int offset = j * (m1 + 1);
+                
+                // For each stock price level - keep sequential loop as in original
+                for(int i = 0; i <= m1; i++) {
+                    double old_s = device_Vec_s_i(i);
+                    double new_s = old_s * (1.0 - div_percentage) - div_amount;
+
+                    if(new_s > 0) {
+                        // Keep linear search as in sequential version
+                        int idx = 0;
+                        for(int k = 0; k <= m1; k++) {
+                            if(device_Vec_s_i(k) > new_s) {
+                                idx = k;
+                                break;
+                            }
+                        }
+
+                        if(idx > 0 && idx < m1 + 1) {
+                            // Interpolate
+                            double s_low = device_Vec_s_i(idx-1);
+                            double s_high = device_Vec_s_i(idx);
+                            double weight = (new_s - s_low) / (s_high - s_low);
+                            
+                            double val_low = U_temp_i(offset + idx-1);
+                            double val_high = U_temp_i(offset + idx);
+                            U_i(offset + i) = (1.0 - weight) * val_low + weight * val_high;
+                        }
+                        else if(idx == 0) {
+                            U_i(offset + i) = U_temp_i(offset);
+                        }
+                        else {
+                            U_i(offset + i) = U_temp_i(offset + m1);
+                        }
+                    }
+                    else {
+                        U_i(offset + i) = 0.0;
+                    }
+                }
+            });
+        team.team_barrier();
+
+        // Increment dividend index (single thread)
+        if(team.team_rank() == 0) {
+            current_div_idx++;
+        }
+        team.team_barrier();
+    }
+    
+    //parallel handling of dividents. Almost works, some small mistake
+    /*
+    const int total_size = (m1+1)*(m2+1);
+
+    int current_div_idx = 0;
+
+    for(int n = 1; n <= N; n++) {
+        double t = n * delta_t;
+
+        //one thread determines if it is a divident date. 
+        //Then broadcast the bool to all other threads
+        // One-thread logic
+        int dividend_int = 0;
+        if (team.team_rank() == 0) {
+        // Evaluate the condition on one thread
+        dividend_int = (current_div_idx < num_dividends &&
+                        t <= dividend_dates(current_div_idx) &&
+                        dividend_dates(current_div_idx) < (n+1)*delta_t)
+                        ? 1 : 0;
+        }
+        // Broadcast the int
+        // Broadcast in place; modifies dividend_int in-place
+        team.team_broadcast(dividend_int, 0);
+        team.team_barrier();
+
+        // Now, all threads have the correct value in dividend_int
+        bool process_dividend = (dividend_int != 0);
+
+        if(process_dividend) {
+
+            // All threads process dividend
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+            [&](const int i) {
+                U_temp_i(i) = U_i(i);
+            });
+            team.team_barrier();
+
+            double div_date       = dividend_dates(current_div_idx);
+            double div_amount     = dividend_amounts(current_div_idx);
+            double div_percentage = dividend_percentages(current_div_idx);
+
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2+1),
+                [&](const int j) {
+                    const int offset = j * (m1 + 1);
+                    
+                    // For each stock price level
+                    for(int i = 0; i <= m1; i++) {
+                        double old_s = device_Vec_s_i(i);
+                        double new_s = old_s * (1.0 - div_percentage) - div_amount;
+                        
+                        if(new_s > 0) {
+                            // Find interpolation points
+                            int idx = 0;
+                            for(int k = 0; k <= m1; k++) {
+                                if(device_Vec_s_i(k) > new_s) {
+                                    idx = k;
+                                    break;
+                                }
+                            }
+
+                            if(idx > 0 && idx < m1 + 1) {
+                                // Interpolate
+                                double s_low = device_Vec_s_i(idx-1);
+                                double s_high = device_Vec_s_i(idx);
+                                double weight = (new_s - s_low) / (s_high - s_low);
+                                
+                                double val_low = U_temp_i(offset + idx-1);
+                                double val_high = U_temp_i(offset + idx);
+                                U_i(offset + i) = (1.0 - weight) * val_low + weight * val_high;
+                            }
+                            else if(idx == 0) {
+                                // Left extrapolation
+                                U_i(offset + i) = U_temp_i(offset);
+                            }
+                            else {
+                                // Right extrapolation
+                                U_i(offset + i) = U_temp_i(offset + m1);
+                            }
+                        }
+                        else {
+                            U_i(offset + i) = 0.0;
+                        }
+                    }
+                });
+        }
+        team.team_barrier();
+
+        // Update index separately
+        if(team.team_rank() == 0 && 
+           current_div_idx < num_dividends && 
+           t > dividend_dates(current_div_idx)) {
+            if(team.league_rank() == 0) {
+                printf("Incrementing div_idx from %d to %d at t = %.4f\n", 
+                       current_div_idx, current_div_idx + 1, t);
+            }
+            current_div_idx++;
+        }
+        team.team_barrier();
+        */
+        
+
+    //This works, but is sequential in divident handling
+    /*
     const int total_size = (m1+1)*(m2+1);
 
     int current_div_idx = 0;
@@ -504,6 +686,11 @@ void device_DO_timestepping_dividend(
         }
         // 4) Synchronize the entire team so that everyone sees updated U_i
         team.team_barrier();
+        */
+        
+        
+        
+        
         
         // Step 1: Y0 computation
         A0.multiply_parallel_s_and_v(U_i, A0_result_i, team);
