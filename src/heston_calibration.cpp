@@ -1036,16 +1036,16 @@ void test_calibration_dividends(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 50;
+    const int num_strikes = 80;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.50 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.40 + i * 0.1;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
-    const int max_iter = 15;
+    const int max_iter = 18;
     const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
     //Handling dividend host device transfer
@@ -1088,7 +1088,11 @@ void test_calibration_dividends(){
 
     // Compute market prices on host using Black-Scholes
     // Generate synthetic market prices
-    generate_market_data(S_0, T, r_d, strikes, h_market_prices);
+    //generate_market_data(S_0, T, r_d, strikes, h_market_prices);
+
+    generate_market_data_with_dividends(
+        S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices
+    );
     Kokkos::deep_copy(market_prices, h_market_prices);
 
 
@@ -1549,16 +1553,16 @@ void test_calibration_american_dividends(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 20;
+    const int num_strikes = 80;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.95 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.45 + i * 0.01;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
-    const int max_iter = 15;
+    const int max_iter = 20;
     const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
     //Handling dividend host device transfer
@@ -1602,6 +1606,8 @@ void test_calibration_american_dividends(){
     // Compute market prices on host using Black-Scholes
     // Generate synthetic market prices
     generate_market_data(S_0, T, r_d, strikes, h_market_prices);
+
+    //generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
     Kokkos::deep_copy(market_prices, h_market_prices);
 
 

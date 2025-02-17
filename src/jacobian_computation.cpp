@@ -44,6 +44,47 @@ void generate_market_data(
     }
 }
 
+void generate_market_data_with_dividends(
+    const double S_0,          // Initial spot price
+    const double T,            // Time to maturity
+    const double r_d,          // Risk-free rate
+    const std::vector<double>& strikes,  // Array of strikes
+    const std::vector<double>& dividend_dates,
+    const std::vector<double>& dividend_amounts,
+    const std::vector<double>& dividend_percentages,
+    Kokkos::View<double*>::HostMirror& h_market_prices
+) {
+    const double market_vol = 0.2;  
+    std::cout << "Volatility Black Scholes: " << market_vol << std::endl;
+
+    // Calculate adjusted spot price
+    double S_adjusted = S_0;
+    for(size_t i = 0; i < dividend_dates.size(); ++i) {
+        if(dividend_dates[i] < T) {  // Only consider dividends before maturity
+            // Fixed amount dividend
+            S_adjusted -= dividend_amounts[i] * std::exp(-r_d * dividend_dates[i]);
+            // Percentage dividend
+            S_adjusted -= (S_0 * dividend_percentages[i]) * std::exp(-r_d * dividend_dates[i]);
+        }
+    }
+
+    // Generate prices using adjusted spot
+    for(size_t i = 0; i < strikes.size(); ++i) {
+        const double K = strikes[i];
+        
+        const double sqrt_T = std::sqrt(T);
+        const double log_SK = std::log(S_adjusted/K);
+        const double vol_sqrt_T = market_vol * sqrt_T;
+        
+        const double d1 = (log_SK + (r_d + 0.5 * market_vol * market_vol) * T) / vol_sqrt_T;
+        const double d2 = d1 - vol_sqrt_T;
+        
+        h_market_prices(i) = S_adjusted * std::erfc(-d1/std::sqrt(2.0))/2.0 
+                          - K * std::exp(-r_d * T) * std::erfc(-d2/std::sqrt(2.0))/2.0;
+    }
+}
+
+
 void solve_5x5_device(
     const Kokkos::View<double**> &A_device,  // shape (5,5)
     const Kokkos::View<double*>  &b_device,  // shape (5)

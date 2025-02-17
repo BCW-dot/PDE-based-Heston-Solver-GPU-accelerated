@@ -13,6 +13,17 @@ void generate_market_data(
     Kokkos::View<double*>::HostMirror& h_market_prices  // Output market prices on host
 );
 
+void generate_market_data_with_dividends(
+    const double S_0,          // Initial spot price
+    const double T,            // Time to maturity
+    const double r_d,          // Risk-free rate
+    const std::vector<double>& strikes,  // Array of strikes
+    const std::vector<double>& dividend_dates,
+    const std::vector<double>& dividend_amounts,
+    const std::vector<double>& dividend_percentages,
+    Kokkos::View<double*>::HostMirror& h_market_prices
+);
+
 //Solves an implicit 5x5 matrix on the gpu
 void solve_5x5_device(
     const Kokkos::View<double**> &A_device,  // shape (5,5)

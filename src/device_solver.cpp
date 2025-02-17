@@ -1152,8 +1152,8 @@ void test_deviceCallable_Do_solver_dividend() {
     //Handling dividend host device transfer
     //{0.0, 0.0, 0.0, 0.0}
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
-    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};//{0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};//{0.02, 0.02, 0.02, 0.02};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
 
     // On host side, create views for dividend data
     Kokkos::View<double*> d_dividend_dates("dividend_dates", dividend_dates.size());
