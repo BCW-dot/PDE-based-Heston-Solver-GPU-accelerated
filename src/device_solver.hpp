@@ -785,8 +785,8 @@ void device_DO_timestepping_american_dividend(
     const typename Kokkos::TeamPolicy<>::member_type& team
 ) { 
 
-    /*
     //parallel handling of dividents. Almost works, some small mistake
+    /*
     const int total_size = (m1+1)*(m2+1);
 
     int current_div_idx = 0;
@@ -892,7 +892,6 @@ void device_DO_timestepping_american_dividend(
         */
 
     //sequential div handling
-    
     const int total_size = (m1+1)*(m2+1);
 
     //Need to reset the lambda function to zero 

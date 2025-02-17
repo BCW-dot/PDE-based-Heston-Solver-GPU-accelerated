@@ -2075,7 +2075,7 @@ void test_CS_schuffled_implied_vol(){
         for(int i = 0; i < num_s_sup + num_s_inf + 1; i++) {
             int s_idx = index_s - num_s_inf + i;
 
-            IV[j][i] = BlackScholes::reverse_BS_new(
+            IV[j][i] = BlackScholes::reverse_BS(
                 1,                    // CP
                 grid.Vec_s[s_idx],   // S
                 K,                   // Strike
@@ -2154,7 +2154,7 @@ void test_black_scholes() {
     
     // Test 3: Implied volatility calculation (reverse engineering)
     double epsilon = 0.0001;
-    double test_vol = BlackScholes::reverse_BS_new(CP, S, K, r, T, 0.5, call_price, epsilon);
+    double test_vol = BlackScholes::reverse_BS(CP, S, K, r, T, 0.5, call_price, epsilon);
     std::cout << "Test 3 - Implied Volatility Calculation\n";
     std::cout << "Original volatility: " << v << "\n";
     std::cout << "Calculated implied volatility: " << test_vol << "\n";

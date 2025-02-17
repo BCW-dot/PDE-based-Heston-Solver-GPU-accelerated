@@ -84,7 +84,6 @@ void generate_market_data_with_dividends(
     }
 }
 
-
 void solve_5x5_device(
     const Kokkos::View<double**> &A_device,  // shape (5,5)
     const Kokkos::View<double*>  &b_device,  // shape (5)

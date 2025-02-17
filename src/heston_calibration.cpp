@@ -4,6 +4,8 @@
 #include "device_solver.hpp"
 //for jacobian
 #include "jacobian_computation.hpp"
+//for implied vols
+#include "bs.hpp"
 
 #include <iostream>
 #include <numeric>
@@ -62,11 +64,11 @@ void test_calibration_european(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 20;
+    const int num_strikes = 30;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.95 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.75 + i * 1.01;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -443,6 +445,33 @@ void test_calibration_european(){
               << std::chrono::duration<double>(t_end_second - t_start).count()
               << " seconds" << std::endl;
 
+    //for ploting
+    // Copy device -> host for market and fitted prices
+    auto h_base_prices   = Kokkos::create_mirror_view(base_prices);
+    Kokkos::deep_copy(h_base_prices,   base_prices);
+    Kokkos::deep_copy(h_market_prices, market_prices);
+
+    //computing implied vols
+    double epsilon = 0.01;
+    // Before the export loop, calculate IVs and their differences
+    std::vector<double> iv_differences(num_strikes);
+    for(int i = 0; i < num_strikes; i++) {
+        double K = strikes[i];
+        double market_price = h_market_prices(i);
+        double heston_price = h_base_prices(i);
+        
+        // Compute implied vol from market price 
+        double market_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, market_price, epsilon);
+        
+        // Compute implied vol from calibrated Heston price
+        double heston_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, heston_price, epsilon);
+        
+        iv_differences[i] = std::abs(market_impl_vol - heston_impl_vol);
+        // Compare - should both be close to 0.2
+        //std::cout << "Strike " << K << ": Market IV = " << market_impl_vol 
+                  //<< ", Heston IV = " << heston_impl_vol << std::endl;
+    }
+
     // ================================================================
     // ============ Export final results to CSV for Python ============
     // ================================================================
@@ -478,18 +507,14 @@ void test_calibration_european(){
         << "\n";
 
     // Write CSV header
-    out << "Strike,MarketPrice,FittedPrice\n";
-
-    // Copy device -> host for market and fitted prices
-    auto h_base_prices   = Kokkos::create_mirror_view(base_prices);
-    Kokkos::deep_copy(h_base_prices,   base_prices);
-    Kokkos::deep_copy(h_market_prices, market_prices);
+    out << "Strike,MarketPrice,FittedPrice,IVDifference\n";
 
     // Write each line: Strike, MarketPrice, FittedHestonPrice
     for (int i = 0; i < num_strikes; ++i) {
         out << strikes[i] 
             << "," << h_market_prices(i) 
             << "," << h_base_prices(i) 
+            << "," << iv_differences[i]
             << "\n";
     }
 
@@ -940,6 +965,34 @@ void test_calibration_american(){
               << std::chrono::duration<double>(t_end_second - t_start).count()
               << " seconds" << std::endl;
 
+
+    //for ploting
+    // Copy device -> host for market and fitted prices
+    auto h_base_prices   = Kokkos::create_mirror_view(base_prices);
+    Kokkos::deep_copy(h_base_prices,   base_prices);
+    Kokkos::deep_copy(h_market_prices, market_prices);
+
+    //computing implied vols
+    double epsilon = 0.01;
+    // Before the export loop, calculate IVs and their differences
+    std::vector<double> iv_differences(num_strikes);
+    for(int i = 0; i < num_strikes; i++) {
+        double K = strikes[i];
+        double market_price = h_market_prices(i);
+        double heston_price = h_base_prices(i);
+        
+        // Compute implied vol from market price 
+        double market_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, market_price, epsilon);
+        
+        // Compute implied vol from calibrated Heston price
+        double heston_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, heston_price, epsilon);
+        
+        iv_differences[i] = std::abs(market_impl_vol - heston_impl_vol);
+        // Compare - should both be close to 0.2
+        //std::cout << "Strike " << K << ": Market IV = " << market_impl_vol 
+                  //<< ", Heston IV = " << heston_impl_vol << std::endl;
+    }
+
     // ================================================================
     // ============ Export final results to CSV for Python ============
     // ================================================================
@@ -975,18 +1028,14 @@ void test_calibration_american(){
         << "\n";
 
     // Write CSV header
-    out << "Strike,MarketPrice,FittedPrice\n";
-
-    // Copy device -> host for market and fitted prices
-    auto h_base_prices   = Kokkos::create_mirror_view(base_prices);
-    Kokkos::deep_copy(h_base_prices,   base_prices);
-    Kokkos::deep_copy(h_market_prices, market_prices);
+    out << "Strike,MarketPrice,FittedPrice,IVDifference\n";
 
     // Write each line: Strike, MarketPrice, FittedHestonPrice
     for (int i = 0; i < num_strikes; ++i) {
         out << strikes[i] 
             << "," << h_market_prices(i) 
             << "," << h_base_prices(i) 
+            << "," << iv_differences[i]
             << "\n";
     }
 
@@ -1036,16 +1085,16 @@ void test_calibration_dividends(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 80;
+    const int num_strikes = 20;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.40 + i * 0.1;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.90 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
-    const int max_iter = 18;
+    const int max_iter = 20;
     const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
     //Handling dividend host device transfer
@@ -1459,6 +1508,33 @@ void test_calibration_dividends(){
               << std::chrono::duration<double>(t_end_second - t_start).count()
               << " seconds" << std::endl;
 
+    //for ploting
+    // Copy device -> host for market and fitted prices
+    auto h_base_prices   = Kokkos::create_mirror_view(base_prices);
+    Kokkos::deep_copy(h_base_prices,   base_prices);
+    Kokkos::deep_copy(h_market_prices, market_prices);
+
+    //computing implied vols
+    double epsilon = 0.01;
+    // Before the export loop, calculate IVs and their differences
+    std::vector<double> iv_differences(num_strikes);
+    for(int i = 0; i < num_strikes; i++) {
+        double K = strikes[i];
+        double market_price = h_market_prices(i);
+        double heston_price = h_base_prices(i);
+        
+        // Compute implied vol from market price 
+        double market_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, market_price, epsilon);
+        
+        // Compute implied vol from calibrated Heston price
+        double heston_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, heston_price, epsilon);
+        
+        iv_differences[i] = std::abs(market_impl_vol - heston_impl_vol);
+        // Compare - should both be close to 0.2
+        //std::cout << "Strike " << K << ": Market IV = " << market_impl_vol 
+                  //<< ", Heston IV = " << heston_impl_vol << std::endl;
+    }
+
     // ================================================================
     // ============ Export final results to CSV for Python ============
     // ================================================================
@@ -1494,18 +1570,14 @@ void test_calibration_dividends(){
         << "\n";
 
     // Write CSV header
-    out << "Strike,MarketPrice,FittedPrice\n";
-
-    // Copy device -> host for market and fitted prices
-    auto h_base_prices   = Kokkos::create_mirror_view(base_prices);
-    Kokkos::deep_copy(h_base_prices,   base_prices);
-    Kokkos::deep_copy(h_market_prices, market_prices);
+    out << "Strike,MarketPrice,FittedPrice,IVDifference\n";
 
     // Write each line: Strike, MarketPrice, FittedHestonPrice
     for (int i = 0; i < num_strikes; ++i) {
         out << strikes[i] 
             << "," << h_market_prices(i) 
             << "," << h_base_prices(i) 
+            << "," << iv_differences[i]
             << "\n";
     }
 
@@ -1553,11 +1625,11 @@ void test_calibration_american_dividends(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 80;
+    const int num_strikes = 10;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.45 + i * 0.01;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.9 + i * 1.01;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -1605,7 +1677,10 @@ void test_calibration_american_dividends(){
 
     // Compute market prices on host using Black-Scholes
     // Generate synthetic market prices
-    generate_market_data(S_0, T, r_d, strikes, h_market_prices);
+    //generate_market_data(S_0, T, r_d, strikes, h_market_prices);
+    generate_market_data_with_dividends(
+        S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices
+    );
 
     //generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
     Kokkos::deep_copy(market_prices, h_market_prices);
