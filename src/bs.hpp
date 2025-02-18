@@ -59,8 +59,6 @@ public:
         return CP * (S * norm_cdf(CP * d1) - K * std::exp(-r * T) * norm_cdf(CP * d2));
     }
     */
-    
-   
 
     // Calculate vega
     static double call_vega(int CP, double S, double K, double r, double v, double T) {
@@ -118,6 +116,8 @@ public:
             if (std::abs(V) < 1e-10) {
                 fail = true;
                 std::cout << "Newton method fails for S = " << S << "strike" << K << std::endl;
+                std::cout << "Call Price " << C << std::endl;
+                std::cout << "Vega " << V << std::endl;
                 break;
             }
             x -= (C - C_target) / V;

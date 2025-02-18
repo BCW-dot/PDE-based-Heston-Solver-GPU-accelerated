@@ -26,6 +26,7 @@ void generate_market_data(
     const double market_vol = 0.2;  
     std::cout << "Volatility Black Scholes: " << market_vol << std::endl;
 
+    //std::cout << "prices " << std::endl;
     // Generate market prices using Black-Scholes
     for(size_t i = 0; i < strikes.size(); ++i) {
         const double K = strikes[i];
@@ -41,6 +42,7 @@ void generate_market_data(
         // Call option price formula
         h_market_prices(i) = S_0 * std::erfc(-d1/std::sqrt(2.0))/2.0 
                           - K * std::exp(-r_d * T) * std::erfc(-d2/std::sqrt(2.0))/2.0;
+        //std::cout << h_market_prices(i) << ", ";
     }
 }
 
@@ -61,16 +63,17 @@ void generate_market_data_with_dividends(
     double S_adjusted = S_0;
     for(size_t i = 0; i < dividend_dates.size(); ++i) {
         if(dividend_dates[i] < T) {  // Only consider dividends before maturity
-            std::cout<< "div applied at " << dividend_dates[i] << std::endl;
+            //std::cout<< "div applied at " << dividend_dates[i] << std::endl;
             // Fixed amount dividend
             S_adjusted -= dividend_amounts[i] * std::exp(-r_d * dividend_dates[i]);
-            std::cout<< "stock after cash " << S_adjusted << std::endl;
+            //std::cout<< "stock after cash " << S_adjusted << std::endl;
             // Percentage dividend
             S_adjusted -= (S_0 * dividend_percentages[i]) * std::exp(-r_d * dividend_dates[i]);
-            std::cout<< "stock after percentage " << S_adjusted << std::endl;
+            //std::cout<< "stock after percentage " << S_adjusted << std::endl;
         }
     }
 
+    //std::cout << "prices with dividends " << std::endl;
     // Generate prices using adjusted spot
     for(size_t i = 0; i < strikes.size(); ++i) {
         const double K = strikes[i];
@@ -84,6 +87,7 @@ void generate_market_data_with_dividends(
         
         h_market_prices(i) = S_adjusted * std::erfc(-d1/std::sqrt(2.0))/2.0 
                           - K * std::exp(-r_d * T) * std::erfc(-d2/std::sqrt(2.0))/2.0;
+        //std::cout << h_market_prices(i) << ", ";
     }
 }
 

@@ -1094,11 +1094,11 @@ void test_calibration_dividends(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 5;
+    const int num_strikes = 30;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.6 + i * 1.0;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.85 + i * 1.1;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -1109,8 +1109,8 @@ void test_calibration_dividends(){
     //Handling dividend host device transfer
     //{0.0, 0.0, 0.0, 0.0}
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
-    std::vector<double> dividend_amounts = {0.5, 0.5, 0.5, 0.5};
-    std::vector<double> dividend_percentages = {0.0, 0.0, 0.0, 0.0};//{0.02, 0.02, 0.02, 0.02};//{0.02, 0.02, 0.02, 0.02};
+    std::vector<double> dividend_amounts = {0.2, 0.2, 0.2, 0.2};
+    std::vector<double> dividend_percentages = {0.001, 0.001, 0.001, 0.001};//{0.02, 0.02, 0.02, 0.02};
 
     // On host side, create views for dividend data
     Kokkos::View<double*> d_dividend_dates("dividend_dates", dividend_dates.size());
@@ -1521,6 +1521,21 @@ void test_calibration_dividends(){
     Kokkos::deep_copy(h_base_prices,   base_prices);
     Kokkos::deep_copy(h_market_prices, market_prices);
 
+    //adjust the starting spot for dividnets
+    double S_adjusted = S_0;
+    for(size_t i = 0; i < dividend_dates.size(); ++i) {
+        if(dividend_dates[i] < T) {  // Only consider dividends before maturity
+            //std::cout<< "div applied at " << dividend_dates[i] << std::endl;
+            // Fixed amount dividend
+            S_adjusted -= dividend_amounts[i] * std::exp(-r_d * dividend_dates[i]);
+            //std::cout<< "stock after cash " << S_adjusted << std::endl;
+            // Percentage dividend
+            S_adjusted -= (S_0 * dividend_percentages[i]) * std::exp(-r_d * dividend_dates[i]);
+            //std::cout<< "stock after percentage " << S_adjusted << std::endl;
+        }
+    }
+
+
     //computing implied vols
     double epsilon = 0.01;
     // Before the export loop, calculate IVs and their differences
@@ -1532,11 +1547,11 @@ void test_calibration_dividends(){
         
         // Compute implied vol from market price 
         //std::cout << "Market prices implied vol computation" << std::endl;
-        double market_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, market_price, epsilon);
+        double market_impl_vol = BlackScholes::reverse_BS(1, S_adjusted, K, r_d, T, 0.5, market_price, epsilon);
         
         // Compute implied vol from calibrated Heston price
         //std::cout << "Fitted prices implied vol computation" << std::endl;
-        double heston_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, heston_price, epsilon);
+        double heston_impl_vol = BlackScholes::reverse_BS(1, S_adjusted, K, r_d, T, 0.5, heston_price, epsilon);
         
         iv_differences[i] = std::abs(market_impl_vol - heston_impl_vol);
         // Compare - should both be close to 0.2
@@ -1616,13 +1631,6 @@ void test_calibration_american_dividends(){
     const double kappa = 1.5;
     const double eta = 0.04;
     
-   /*
-    const double rho = 0.03;
-    const double sigma = 0.02;
-    const double kappa = 3.0;
-    const double eta = 0.01;
-    */
-    
     // Numerical parameters
     const int m1 = 50;
     const int m2 = 25;
@@ -1634,7 +1642,7 @@ void test_calibration_american_dividends(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 5;
+    const int num_strikes = 30;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
@@ -1649,7 +1657,7 @@ void test_calibration_american_dividends(){
     //Handling dividend host device transfer
     //{0.0, 0.0, 0.0, 0.0}
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
-    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_amounts = {0.3, 0.3, 0.3, 0.3};
     std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
 
     // On host side, create views for dividend data
@@ -1687,10 +1695,10 @@ void test_calibration_american_dividends(){
     // Compute market prices on host using Black-Scholes
     // Generate synthetic market prices
     //generate_market_data(S_0, T, r_d, strikes, h_market_prices);
-    generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
+    //generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
 
     //generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
-    Kokkos::deep_copy(market_prices, h_market_prices);
+    //Kokkos::deep_copy(market_prices, h_market_prices);
 
 
     // Create solver arrays for each strike
@@ -1813,6 +1821,30 @@ void test_calibration_american_dividends(){
     static constexpr double sigma_min = 1e-6, sigma_max = 5.0;
     static constexpr double v0_min = 1e-6, v0_max = 1.0;
     */
+
+    //generate synthetic american divident option prices:
+    double market_kappa = 3.0;
+    double market_eta = 0.1;
+    double market_sigma = 0.05;
+    double market_rho = 0.2;
+    double market_v0 = 0.06;
+
+    compute_base_prices_american_dividends(S_0, market_v0, T,
+        r_d, r_f,
+        market_rho, market_sigma, market_kappa, market_eta,
+        m1, m2, total_size, N, theta, delta_t,
+        num_strikes,
+        A0_solvers, A1_solvers, A2_solvers,
+        bounds_d, deviceGrids, U_0,
+        workspace,
+        num_dividends,
+        d_dividend_dates,     // Use device view instead of vector
+        d_dividend_amounts,   // Use device view instead of vector
+        d_dividend_percentages, // Use device view instead of vector
+        base_prices
+    );
+    // Both Views are on device, so we can directly copy
+    Kokkos::deep_copy(market_prices, base_prices);  
     
     
     // Main iteration loop
@@ -2062,6 +2094,20 @@ void test_calibration_american_dividends(){
     Kokkos::deep_copy(h_base_prices,   base_prices);
     Kokkos::deep_copy(h_market_prices, market_prices);
 
+    //adjust the starting spot for dividnets
+    double S_adjusted = S_0;
+    for(size_t i = 0; i < dividend_dates.size(); ++i) {
+        if(dividend_dates[i] < T) {  // Only consider dividends before maturity
+            //std::cout<< "div applied at " << dividend_dates[i] << std::endl;
+            // Fixed amount dividend
+            S_adjusted -= dividend_amounts[i] * std::exp(-r_d * dividend_dates[i]);
+            //std::cout<< "stock after cash " << S_adjusted << std::endl;
+            // Percentage dividend
+            S_adjusted -= (S_0 * dividend_percentages[i]) * std::exp(-r_d * dividend_dates[i]);
+            //std::cout<< "stock after percentage " << S_adjusted << std::endl;
+        }
+    }
+
     //computing implied vols
     double epsilon = 0.01;
     // Before the export loop, calculate IVs and their differences
@@ -2072,10 +2118,10 @@ void test_calibration_american_dividends(){
         double heston_price = h_base_prices(i);
         
         // Compute implied vol from market price 
-        double market_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, market_price, epsilon);
+        double market_impl_vol = BlackScholes::reverse_BS(1, S_adjusted, K, r_d, T, 0.5, market_price, epsilon);
         
         // Compute implied vol from calibrated Heston price
-        double heston_impl_vol = BlackScholes::reverse_BS(1, S_0, K, r_d, T, 0.5, heston_price, epsilon);
+        double heston_impl_vol = BlackScholes::reverse_BS(1, S_adjusted, K, r_d, T, 0.5, heston_price, epsilon);
         
         iv_differences[i] = std::abs(market_impl_vol - heston_impl_vol);
         // Compare - should both be close to 0.2
@@ -2139,8 +2185,10 @@ void test_heston_calibration(){
   {
     //test_calibration_european();
     //test_calibration_american();
-    test_calibration_dividends();
-    //test_calibration_american_dividends();
+    //test_calibration_dividends();
+
+    test_calibration_american_dividends();
+
   }
   Kokkos::finalize();
  

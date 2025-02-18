@@ -513,7 +513,6 @@ for(int n = 1; n <= N; n++) {
     //parallel handling of dividents. Almost works, some small mistake
     //produces the same result as sequential, but onyl when all % and cahs div are 
     //the same respectively
-    
     const int total_size = (m1+1)*(m2+1);
 
     int current_div_idx = 0;
@@ -790,14 +789,14 @@ void device_DO_timestepping_american_dividend(
     // Team handle
     const typename Kokkos::TeamPolicy<>::member_type& team
 ) { 
-
     //parallel handling of dividents. Almost works, some small mistake
-    /*
-    const int total_size = (m1+1)*(m2+1);
+    //produces the same result as sequential, but onyl when all % and cahs div are 
+    //the same respectively
+    //Need to reset the lambda function to zero 
 
+    const int total_size = (m1+1)*(m2+1);
     int current_div_idx = 0;
 
-    //Need to reset the lambda function to zero 
     Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
     [&](const int i) {
         lambda_bar_i(i) = 0;
@@ -895,9 +894,9 @@ void device_DO_timestepping_american_dividend(
             current_div_idx++;
         }
         team.team_barrier();
-        */
-
+    
     //sequential div handling
+    /*
     const int total_size = (m1+1)*(m2+1);
 
     //Need to reset the lambda function to zero 
@@ -981,6 +980,7 @@ void device_DO_timestepping_american_dividend(
         }
         // 4) Synchronize the entire team so that everyone sees updated U_i
         team.team_barrier();
+        */
         
         
         // Step 1: Y0 computation
