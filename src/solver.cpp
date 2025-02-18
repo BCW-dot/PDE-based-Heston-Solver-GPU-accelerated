@@ -85,9 +85,6 @@ public:
             // Record dimensions
             std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
             
-            // Start timing
-            auto start = std::chrono::high_resolution_clock::now();
-            
             // Setup grid and matrices
             int m = (m1 + 1) * (m2 + 1);
             Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
@@ -125,9 +122,16 @@ public:
             }
             Kokkos::deep_copy(U_0, h_U_0);
 
+            // Start timing
+            auto start = std::chrono::high_resolution_clock::now();
+
             // Run solver
             DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
             //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+
+            // Record time
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration = end - start;
 
             // Get price
             auto h_U = Kokkos::create_mirror_view(U);
@@ -136,10 +140,6 @@ public:
             int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
             int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
             double price = h_U[index_s + index_v*(m1+1)];
-            
-            // Record time
-            auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration = end - start;
             
             // Store results
             data.times.push_back(duration.count());
@@ -218,7 +218,6 @@ public:
             DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
             //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
 
-
             // Record time
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> duration = end - start;
@@ -296,6 +295,7 @@ public:
             Kokkos::deep_copy(U_0, h_U_0);
 
             auto start = std::chrono::high_resolution_clock::now();
+
             DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
             //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
 
@@ -337,12 +337,6 @@ public:
     for (size_t i = 0; i < m1_sizes.size(); ++i) {
         int m1 = m1_sizes[i];
         int m2 = fixed_m2;
-
-        auto t_start = std::chrono::high_resolution_clock::now();
-        
-        std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
-        
-        //auto start = std::chrono::high_resolution_clock::now();
         
         int m = (m1 + 1) * (m2 + 1);
         Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
@@ -360,7 +354,7 @@ public:
 
         const int N = 20;
         const double delta_t = T / N;
-        const double theta = 0.5;
+        const double theta = 0.8;
 
         A1.build_implicit(theta, delta_t);
         //A2.build_implicit(theta, delta_t);
@@ -380,19 +374,25 @@ public:
         }
         Kokkos::deep_copy(U_0, h_U_0);
 
-        auto start = std::chrono::high_resolution_clock::now();
+        int repeats = 50;
+        double totalTime = 0.0;
 
-        DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);//A2, A2_shuf, bounds, r_f, U);
-
-        auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> duration = (end - start);
+        for (int i = 0; i < repeats; i++) {
+            auto start = std::chrono::high_resolution_clock::now();
+            
+            // Call your function once
+            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
         
+            auto end = std::chrono::high_resolution_clock::now();
+            // Duration in seconds for this single call
+            std::chrono::duration<double> iterationDuration = (end - start);
+        
+            // Accumulate the time
+            totalTime += iterationDuration.count();
+        }
+        
+        double averageTime = totalTime / repeats;
 
-        auto t_end = std::chrono::high_resolution_clock::now();
-
-        std::cout << "Entire setz up everythig time: "
-                << std::chrono::duration<double>(t_end - t_start).count()
-                << " seconds" << std::endl;
 
         auto h_U = Kokkos::create_mirror_view(U);
         Kokkos::deep_copy(h_U, U);
@@ -402,7 +402,7 @@ public:
         double price = h_U[index_s + index_v*(m1+1)];
         
         
-        data.times.push_back(duration.count());
+        data.times.push_back(averageTime);
         data.prices.push_back(price);
         data.errors.push_back(std::abs(price - ref_price) / ref_price);
     }
@@ -447,9 +447,9 @@ public:
             //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
             A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
-            const int N = 80;
+            const int N = 20;
             const double delta_t = T / N;
-            const double theta = 0.5;
+            const double theta = 0.8;
 
             A1.build_implicit(theta, delta_t);
             //A2.build_implicit(theta, delta_t);
@@ -469,12 +469,24 @@ public:
             }
             Kokkos::deep_copy(U_0, h_U_0);
 
-            auto start = std::chrono::high_resolution_clock::now();
-            
-            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);//A2, A2_shuf, bounds, r_f, U);
+            int repeats = 50;
+            double totalTime = 0.0;
 
-            auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration = end - start;
+            for (int i = 0; i < repeats; i++) {
+                auto start = std::chrono::high_resolution_clock::now();
+                
+                // Call your function once
+                DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
+            
+                auto end = std::chrono::high_resolution_clock::now();
+                // Duration in seconds for this single call
+                std::chrono::duration<double> iterationDuration = (end - start);
+            
+                // Accumulate the time
+                totalTime += iterationDuration.count();
+            }
+            
+            double averageTime = totalTime / repeats;
 
             auto h_U = Kokkos::create_mirror_view(U);
             Kokkos::deep_copy(h_U, U);
@@ -483,7 +495,7 @@ public:
             int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
             double price = h_U[index_s + index_v*(m1+1)];
             
-            data.times.push_back(duration.count());
+            data.times.push_back(averageTime);
             data.prices.push_back(price);
             data.errors.push_back(std::abs(price - ref_price) / ref_price);
         }
@@ -735,12 +747,16 @@ void test_DO_m1_convergence() {
 
 void test_all_convergence() {
     // Market parameters
+
     const double K = 100.0;
     const double S_0 = 100.0;
     const double V_0 = 0.04;
+
     const double T = 1.0;
+
     const double r_d = 0.025;
     const double r_f = 0.0;
+
     const double rho = -0.9;
     const double sigma = 0.3;
     const double kappa = 1.5;
@@ -758,7 +774,7 @@ void test_all_convergence() {
     ConvergenceExporter::exportToCSV("do_scheme_m1", data_m1);
     
     // Test m2 convergence
-    std::vector<int> m2_sizes = {20, 50, 70, 75, 85, 90, 100};
+    std::vector<int> m2_sizes = {30, 50, 70, 75, 85, 90, 100};
     int fixed_m1 = 100;
     auto data_m2 = ConvergenceExporter::testFixedM1VaryM2(
         fixed_m1, m2_sizes, ref_price,
@@ -986,14 +1002,43 @@ void test_heston_call_shuffled_vary_m1() {
     }
 }
 
-void test_shuffled_convergence() {
-    // Market parameters (same as before)
+void test_DO_shuffle_m2_convergence() {
+    // Market parameters
     const double K = 100.0;
     const double S_0 = 100.0;
     const double V_0 = 0.04;
     const double T = 1.0;
     const double r_d = 0.025;
     const double r_f = 0.0;
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double kappa = 1.5;
+    const double eta = 0.04;
+    
+    const double ref_price = 8.8948693600540167;
+    
+    // Test parameters
+    std::vector<int> m2_sizes = {30, 50, 70, 75, 85, 90, 100};
+    int fixed_m1 = 100;
+    auto data_m2 = ConvergenceExporter::testFixedM1VaryM2_shuffled(
+        fixed_m1, m2_sizes, ref_price,
+        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
+    );
+    
+    ConvergenceExporter::exportToCSV("do_scheme_shuffle_m2", data_m2);
+}
+
+void test_shuffled_convergence() {
+    // Market parameters (same as before)
+    const double K = 100.0;
+    const double S_0 = 100.0;
+    const double V_0 = 0.04;
+
+    const double T = 1.0;
+
+    const double r_d = 0.025;
+    const double r_f = 0.0;
+
     const double rho = -0.9;
     const double sigma = 0.3;
     const double kappa = 1.5;
@@ -1011,8 +1056,8 @@ void test_shuffled_convergence() {
     ConvergenceExporter::exportToCSV("do_scheme_shuffled_m1", data_m1);
     
     // Test m2 convergence
-    std::vector<int> m2_sizes = {20, 50, 70, 75, 85, 90, 100};
-    int fixed_m1 = 300;
+    std::vector<int> m2_sizes = {30, 50, 70, 75, 85, 90, 100};
+    int fixed_m1 = 100;
     auto data_m2 = ConvergenceExporter::testFixedM1VaryM2_shuffled(
         fixed_m1, m2_sizes, ref_price,
         K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
@@ -2284,12 +2329,13 @@ void test_DO_scheme() {
         */
         //test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
-        //test_shuffled_convergence();
+        test_shuffled_convergence();
+        //test_DO_shuffle_m2_convergence();
 
         //test_heston_american_call_shuffled();
         //test_lambda_american_call();
 
-        test_heston_divident_call_shuffled();
+        //test_heston_divident_call_shuffled();
         //test_heston_divident_call_price_surface();
 
         //test_heston_american_dividend_call_shuffled();

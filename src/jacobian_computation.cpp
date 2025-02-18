@@ -61,10 +61,13 @@ void generate_market_data_with_dividends(
     double S_adjusted = S_0;
     for(size_t i = 0; i < dividend_dates.size(); ++i) {
         if(dividend_dates[i] < T) {  // Only consider dividends before maturity
+            std::cout<< "div applied at " << dividend_dates[i] << std::endl;
             // Fixed amount dividend
             S_adjusted -= dividend_amounts[i] * std::exp(-r_d * dividend_dates[i]);
+            std::cout<< "stock after cash " << S_adjusted << std::endl;
             // Percentage dividend
             S_adjusted -= (S_0 * dividend_percentages[i]) * std::exp(-r_d * dividend_dates[i]);
+            std::cout<< "stock after percentage " << S_adjusted << std::endl;
         }
     }
 

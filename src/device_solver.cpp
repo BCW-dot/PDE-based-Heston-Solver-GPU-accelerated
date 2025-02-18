@@ -409,13 +409,15 @@ void test_parallel_DO_method() {
     const int m1 = 50;
     const int m2 = 25;
 
+    std::cout << "Dimesnions m1: " << m1 << " m2: " << m2 << std::endl;
+
     const int nInstances = 5;
 
     //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
     //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
     std::vector<double> strikes(nInstances,0.0);
     for(int i = 0; i < nInstances; ++i) {
-        strikes[i] = 100 + i;
+        strikes[i] = 100;
     }
     
     // Solver parameters
@@ -575,13 +577,14 @@ void test_parallel_DO_method() {
                 //<< ", Relative Error = " << rel_error << "\n";
     }
     */
-
+    /*
     for(int inst = 0; inst <  min(10,nInstances); ++inst) {
         std::cout << "Instance " << inst 
                   << " Strike "  << strikes[inst] 
                 << ": base price index comp Price = " << std::setprecision(16) << h_base_prices(inst) << "\n";
                 //<< ", Relative Error = " << rel_error << "\n";
     }
+    */
 }
 
 
@@ -611,16 +614,16 @@ void test_deviceCallable_Do_solver() {
     const double eta = 0.04;
     
     // Parameters
-    const int m1 = 50;
-    const int m2 = 25;
+    const int m1 = 300;
+    const int m2 = 100;
 
-    const int nInstances = 50;
+    const int nInstances = 20;
 
     //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
     //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
     std::vector<double> strikes(nInstances,0.0);
     for(int i = 0; i < nInstances; ++i) {
-        strikes[i] = 90 + i;
+        strikes[i] = 85.0 + i;
     }
     
     // Solver parameters
@@ -766,12 +769,15 @@ void test_deviceCallable_Do_solver() {
     std::cout << "Parallel DO time: "
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
+    
 
     // Results processing uses workspace.U instead of U
     auto h_U = Kokkos::create_mirror_view(workspace.U);
     Kokkos::deep_copy(h_U, workspace.U);
 
-    for(int inst = 0; inst < min(5,nInstances); ++inst) {
+    const double reference_price = 8.8948693600540167;
+
+    for(int inst = 0; inst < min(1,nInstances); ++inst) {
         // Create host mirrors for the grid views
         auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_s);
         auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_v);
@@ -797,12 +803,12 @@ void test_deviceCallable_Do_solver() {
         }
 
         double price = h_U(inst, index_s + index_v*(m1+1));
-        //double rel_error = std::abs(price - reference_price)/reference_price;
+        double rel_error = std::abs(price - reference_price)/reference_price;
         
         std::cout << "Instance " << inst 
                   << " Strike " << strikes[inst] 
-                << ": Price = " << std::setprecision(16) << price << "\n";
-                //<< ", Relative Error = " << rel_error << "\n";
+                << ": Price = " << std::setprecision(16) << price << "\n"
+                << ", Relative Error = " << rel_error << std::endl;
     }
 }
 
@@ -2628,9 +2634,9 @@ void test_device_class() {
     //test_DEVICE_parallel_DO_scheme();  
     //test_parallel_DO_method();  
 
-    //test_deviceCallable_Do_solver();
+    test_deviceCallable_Do_solver();
     //test_deviceCallable_Do_solver_american();
-    test_deviceCallable_Do_solver_dividend();
+    //test_deviceCallable_Do_solver_dividend();
     //test_deviceCallable_Do_solver_american_dividend();
 
 

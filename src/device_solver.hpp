@@ -511,6 +511,9 @@ for(int n = 1; n <= N; n++) {
     */
     
     //parallel handling of dividents. Almost works, some small mistake
+    //produces the same result as sequential, but onyl when all % and cahs div are 
+    //the same respectively
+    
     const int total_size = (m1+1)*(m2+1);
 
     int current_div_idx = 0;
@@ -609,6 +612,7 @@ for(int n = 1; n <= N; n++) {
         team.team_barrier();
         
         
+        
 
     //This works, but is sequential in divident handling
     /*
@@ -690,6 +694,8 @@ for(int n = 1; n <= N; n++) {
         // 4) Synchronize the entire team so that everyone sees updated U_i
         team.team_barrier();
         */
+        
+        
 
         // Step 1: Y0 computation
         A0.multiply_parallel_s_and_v(U_i, A0_result_i, team);
