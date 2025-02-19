@@ -68,8 +68,6 @@ int main(int argc, char* argv[]) {
     //test_heston_calibration();
     //test_jacobian_computation();
 
-
-
     //test_kokkos_kernels();
     std::cout << "Tests have completed successfully." << std::endl;
     

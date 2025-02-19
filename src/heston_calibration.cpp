@@ -2167,10 +2167,10 @@ void test_calibration_american_dividends(){
 void test_heston_calibration(){
   Kokkos::initialize();
   {
-    test_calibration_european();
+    //test_calibration_european();
     //test_calibration_american();
     //test_calibration_dividends();
-    //test_calibration_american_dividends();
+    test_calibration_american_dividends();
 
   }
   Kokkos::finalize();

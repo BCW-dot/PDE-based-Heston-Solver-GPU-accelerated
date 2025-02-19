@@ -156,7 +156,7 @@ class BoundaryConditions_put {
     
             // Initialize b1 (S direction boundary at S=0)
             for(int j = 0; j <= m2_; j++) {
-                h_b1[j * (m1_ + 1)] = 0;//K * std::exp(-r_d_ * delta_t_ * (N_ - 1) - r_f_ * delta_t_ * (N_ - 1));
+                h_b1[j * (m1_ + 1)] =  0;//K * std::exp(-r_d_); 
             }
     
             // Combine boundaries on host
