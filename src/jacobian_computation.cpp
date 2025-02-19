@@ -11,85 +11,11 @@
 #include <fstream>  // For std::ofstream
 #include <iostream> // For std::cerr, std::cout
 
+#include "bs.hpp" //for market prices generating
+
 #include <KokkosBlas2_gemv.hpp> // for gemv
 #include <KokkosBlas3_gemm.hpp> // for gemm
 
-// Function to generate synthetic market prices
-void generate_market_data(
-    const double S_0,          // Spot price
-    const double T,            // Time to maturity
-    const double r_d,          // Risk-free rate
-    const std::vector<double>& strikes,  // Array of strikes
-    Kokkos::View<double*>::HostMirror& h_market_prices  // Output market prices on host
-) {
-    // Fixed market volatility for synthetic data generation
-    const double market_vol = 0.2;  
-    std::cout << "Volatility Black Scholes: " << market_vol << std::endl;
-
-    //std::cout << "prices " << std::endl;
-    // Generate market prices using Black-Scholes
-    for(size_t i = 0; i < strikes.size(); ++i) {
-        const double K = strikes[i];
-        
-        // Using d1 and d2 formulation for better numerical stability
-        const double sqrt_T = std::sqrt(T);
-        const double log_SK = std::log(S_0/K);
-        const double vol_sqrt_T = market_vol * sqrt_T;
-        
-        const double d1 = (log_SK + (r_d + 0.5 * market_vol * market_vol) * T) / vol_sqrt_T;
-        const double d2 = d1 - vol_sqrt_T;
-        
-        // Call option price formula
-        h_market_prices(i) = S_0 * std::erfc(-d1/std::sqrt(2.0))/2.0 
-                          - K * std::exp(-r_d * T) * std::erfc(-d2/std::sqrt(2.0))/2.0;
-        //std::cout << h_market_prices(i) << ", ";
-    }
-}
-
-void generate_market_data_with_dividends(
-    const double S_0,          // Initial spot price
-    const double T,            // Time to maturity
-    const double r_d,          // Risk-free rate
-    const std::vector<double>& strikes,  // Array of strikes
-    const std::vector<double>& dividend_dates,
-    const std::vector<double>& dividend_amounts,
-    const std::vector<double>& dividend_percentages,
-    Kokkos::View<double*>::HostMirror& h_market_prices
-) {
-    const double market_vol = 0.2;  
-    std::cout << "Volatility Black Scholes: " << market_vol << std::endl;
-
-    // Calculate adjusted spot price
-    double S_adjusted = S_0;
-    for(size_t i = 0; i < dividend_dates.size(); ++i) {
-        if(dividend_dates[i] < T) {  // Only consider dividends before maturity
-            //std::cout<< "div applied at " << dividend_dates[i] << std::endl;
-            // Fixed amount dividend
-            S_adjusted -= dividend_amounts[i] * std::exp(-r_d * dividend_dates[i]);
-            //std::cout<< "stock after cash " << S_adjusted << std::endl;
-            // Percentage dividend
-            S_adjusted -= (S_0 * dividend_percentages[i]) * std::exp(-r_d * dividend_dates[i]);
-            //std::cout<< "stock after percentage " << S_adjusted << std::endl;
-        }
-    }
-
-    //std::cout << "prices with dividends " << std::endl;
-    // Generate prices using adjusted spot
-    for(size_t i = 0; i < strikes.size(); ++i) {
-        const double K = strikes[i];
-        
-        const double sqrt_T = std::sqrt(T);
-        const double log_SK = std::log(S_adjusted/K);
-        const double vol_sqrt_T = market_vol * sqrt_T;
-        
-        const double d1 = (log_SK + (r_d + 0.5 * market_vol * market_vol) * T) / vol_sqrt_T;
-        const double d2 = d1 - vol_sqrt_T;
-        
-        h_market_prices(i) = S_adjusted * std::erfc(-d1/std::sqrt(2.0))/2.0 
-                          - K * std::exp(-r_d * T) * std::erfc(-d2/std::sqrt(2.0))/2.0;
-        //std::cout << h_market_prices(i) << ", ";
-    }
-}
 
 void solve_5x5_device(
     const Kokkos::View<double**> &A_device,  // shape (5,5)
@@ -1463,7 +1389,7 @@ void test_jacobian_method(){
 
     // Compute market prices on host using Black-Scholes
     // Generate synthetic market prices
-    generate_market_data(S_0, T, r_d, strikes, h_market_prices);
+    BlackScholes::generate_market_data(S_0, T, r_d, strikes, h_market_prices);
     Kokkos::deep_copy(market_prices, h_market_prices);
 
 

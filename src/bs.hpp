@@ -37,7 +37,6 @@ private:
 
 public:
     // Calculate call option price
-    
     static double call_price(int CP, double S, double K, double r, double v, double T) {
         const double sqrt_T = std::sqrt(T);
         const double log_SK = std::log(S/K);
@@ -49,16 +48,67 @@ public:
         return S * std::erfc(-d1/std::sqrt(2.0))/2.0 
                - K * std::exp(-r * T) * std::erfc(-d2/std::sqrt(2.0))/2.0;
     }
-               
-    
-    /*
-    static double call_price(int CP, double S, double K, double r, double v, double T) {
-        double d1 = d_j(1, S, K, r, v, T);
-        double d2 = d_j(2, S, K, r, v, T);
 
-        return CP * (S * norm_cdf(CP * d1) - K * std::exp(-r * T) * norm_cdf(CP * d2));
+    // Function to generate synthetic market prices
+    static void generate_market_data(
+        const double S_0,          // Spot price
+        const double T,            // Time to maturity
+        const double r_d,          // Risk-free rate
+        const std::vector<double>& strikes,  // Array of strikes
+        Kokkos::View<double*>::HostMirror& h_market_prices  // Output market prices on host
+    ) {
+        // Fixed market volatility for synthetic data generation
+        const double market_vol = 0.2;  
+        std::cout << "Volatility Black Scholes: " << market_vol << std::endl;
+
+        //std::cout << "prices " << std::endl;
+        // Generate market prices using Black-Scholes
+        for(size_t i = 0; i < strikes.size(); ++i) {
+            const double K = strikes[i];
+    
+            h_market_prices(i) = call_price(1, S_0, K, r_d, market_vol, T);
+            std::cout << h_market_prices(i) << ", ";
+        }
     }
-    */
+    
+    static void generate_market_data_with_dividends(
+        const double S_0,          // Initial spot price
+        const double T,            // Time to maturity
+        const double r_d,          // Risk-free rate
+        const std::vector<double>& strikes,  // Array of strikes
+        const std::vector<double>& dividend_dates,
+        const std::vector<double>& dividend_amounts,
+        const std::vector<double>& dividend_percentages,
+        Kokkos::View<double*>::HostMirror& h_market_prices
+    ) {
+        const double market_vol = 0.2;  
+        std::cout << "Volatility Black Scholes: " << market_vol << std::endl;
+    
+        // Calculate adjusted spot price
+        double S_adjusted = S_0;
+        for(size_t i = 0; i < dividend_dates.size(); ++i) {
+            if(dividend_dates[i] < T) {  // Only consider dividends before maturity
+                //std::cout<< "div applied at " << dividend_dates[i] << std::endl;
+                // Fixed amount dividend
+                S_adjusted -= dividend_amounts[i] * std::exp(-r_d * dividend_dates[i]);
+                //std::cout<< "stock after cash " << S_adjusted << std::endl;
+                // Percentage dividend
+                S_adjusted -= (S_0 * dividend_percentages[i]) * std::exp(-r_d * dividend_dates[i]);
+                //std::cout<< "stock after percentage " << S_adjusted << std::endl;
+            }
+        }
+    
+        //std::cout << "prices with dividends " << std::endl;
+        // Generate prices using adjusted spot
+        for(size_t i = 0; i < strikes.size(); ++i) {
+            const double K = strikes[i];
+        
+            h_market_prices(i) = call_price(1, S_adjusted, K, r_d, market_vol, T);
+
+            std::cout << h_market_prices(i) << ", ";
+        }
+    }
+    
 
     // Calculate vega
     static double call_vega(int CP, double S, double K, double r, double v, double T) {

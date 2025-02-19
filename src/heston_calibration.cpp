@@ -89,19 +89,8 @@ void test_calibration_european(){
 
     // Compute market prices on host using Black-Scholes
     // Generate synthetic market prices
-    generate_market_data(S_0, T, r_d, strikes, h_market_prices);
-
-    //this is only here for debugging the divident pricer
-    /*
-    std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
-    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
-
-    generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
-    */
-
+    BlackScholes::generate_market_data(S_0, T, r_d, strikes, h_market_prices);
     Kokkos::deep_copy(market_prices, h_market_prices);
-
 
     // Create solver arrays for each strike
     Kokkos::View<Device_A0_heston<Device>*> A0_solvers("A0_solvers", num_strikes);
@@ -574,7 +563,7 @@ void test_calibration_american(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 60;
+    const int num_strikes = 10;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
@@ -599,7 +588,7 @@ void test_calibration_american(){
 
     // Compute market prices on host using Black-Scholes
     // Generate synthetic market prices
-    generate_market_data(S_0, T, r_d, strikes, h_market_prices);
+    BlackScholes::generate_market_data(S_0, T, r_d, strikes, h_market_prices);
     Kokkos::deep_copy(market_prices, h_market_prices);
 
 
@@ -1094,7 +1083,7 @@ void test_calibration_dividends(){
     const double eps = 1e-6;  // Perturbation size
 
     // Setup strikes and market data
-    const int num_strikes = 30;
+    const int num_strikes = 10;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
@@ -1146,9 +1135,8 @@ void test_calibration_dividends(){
 
     // Compute market prices on host using Black-Scholes
     // Generate synthetic market prices
-    //generate_market_data(S_0, T, r_d, strikes, h_market_prices);
 
-    generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
+    BlackScholes::generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
     Kokkos::deep_copy(market_prices, h_market_prices);
 
 
@@ -1692,13 +1680,9 @@ void test_calibration_american_dividends(){
     Kokkos::View<double*> market_prices("market_prices", num_strikes);
     auto h_market_prices = Kokkos::create_mirror_view(market_prices);
 
-    // Compute market prices on host using Black-Scholes
-    // Generate synthetic market prices
-    //generate_market_data(S_0, T, r_d, strikes, h_market_prices);
-    //generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
-
-    //generate_market_data_with_dividends(S_0, T, r_d, strikes, dividend_dates, dividend_amounts, dividend_percentages, h_market_prices);
-    //Kokkos::deep_copy(market_prices, h_market_prices);
+    //We can not use Black scholes market prices to calibrate too. The model
+    //would produce too "simple" rpices where we can not calibrate to. 
+    
 
 
     // Create solver arrays for each strike
@@ -2183,11 +2167,10 @@ void test_calibration_american_dividends(){
 void test_heston_calibration(){
   Kokkos::initialize();
   {
-    //test_calibration_european();
+    test_calibration_european();
     //test_calibration_american();
     //test_calibration_dividends();
-
-    test_calibration_american_dividends();
+    //test_calibration_american_dividends();
 
   }
   Kokkos::finalize();

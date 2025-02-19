@@ -79,7 +79,7 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
 }
 */
 
-template<class ViewType>
+template<class ViewType, class BoundaryType>
 void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
                         const int N,                     // Number of time steps
                         const ViewType& U_0,             // Initial condition
@@ -88,7 +88,7 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
                         heston_A0Storage_gpu& A0,        // A0 matrix
                         heston_A1Storage_gpu& A1,        // A1 matrix 
                         heston_A2Storage_gpu& A2,        // A2 matrix
-                        const BoundaryConditions& bounds,// Boundary conditions
+                        const BoundaryType& bounds,// Boundary conditions
                         const double r_f,                // Foreign interest rate
                         ViewType& U) {                   // Result vector
     
@@ -185,7 +185,7 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
               << " seconds" << std::endl;
 }
 
-template<class ViewType>
+template<class ViewType, class BoundaryType>
 void DO_scheme_shuffle(const int m,                    
               const int m1,                    // Added for shuffling
               const int m2,                    // Added for shuffling
@@ -196,7 +196,7 @@ void DO_scheme_shuffle(const int m,
               heston_A0Storage_gpu& A0,        
               heston_A1Storage_gpu& A1,        
               heston_A2_shuffled& A2_shuf,     // Add shuffled version
-              const BoundaryConditions& bounds,
+              const BoundaryType& bounds,
               const double r_f,                
               ViewType& U) {                   
     
@@ -1131,7 +1131,7 @@ These are hardcoded methods used for vizulization.
 */
 //This method is used to plot the dividend impact on the price surface where we plot
 //it against time and stock price. 
-template<class ViewType>
+template<class ViewType, class BoundaryType>
 void DO_scheme_dividend_shuffled_with_surface_tracking(
     const int m, 
     const int m1, 
@@ -1147,7 +1147,7 @@ void DO_scheme_dividend_shuffled_with_surface_tracking(
     heston_A0Storage_gpu& A0,
     heston_A1Storage_gpu& A1,
     heston_A2_shuffled& A2_shuf,
-    const BoundaryConditions& bounds,
+    const BoundaryType& bounds,
     const double r_f,
     ViewType& U,
     Kokkos::View<double**>& price_surface, //for plotting
@@ -1326,14 +1326,14 @@ void DO_scheme_dividend_shuffled_with_surface_tracking(
 
 //This method is used to plot the lambda surface appearing in the american option computation
 //against stokc and time
-template<class ViewType>
+template<class ViewType, class BoundaryType>
 void DO_scheme_american_shuffle_with_lambda_tracking(
     const int m, const int m1, const int m2, const int N,                     
     const ViewType& U_0, const double delta_t, const double theta,              
     heston_A0Storage_gpu& A0, 
     heston_A1Storage_gpu& A1,        
     heston_A2_shuffled& A2_shuf,     
-    const BoundaryConditions& bounds, const double r_f,
+    const BoundaryType& bounds, const double r_f,
     const double V_0,  // Add V_0 to help find variance level                
     ViewType& U,
     std::vector<std::vector<double>>& lambda_evolution) {                   
@@ -1456,7 +1456,7 @@ void DO_scheme_american_shuffle_with_lambda_tracking(
 }
 
 //This is just like the above, only that we have dividends as well, we are still tracking lambda tho
-template<class ViewType>
+template<class ViewType, class BoundaryType>
 void DO_scheme_american_dividend_shuffle_with_lambda_tracking(
     const int m,                    
     const int m1,                    
@@ -1472,7 +1472,7 @@ void DO_scheme_american_dividend_shuffle_with_lambda_tracking(
     heston_A0Storage_gpu& A0,        
     heston_A1Storage_gpu& A1,                
     heston_A2_shuffled& A2_shuf,     
-    const BoundaryConditions& bounds,
+    const BoundaryType& bounds,
     const double r_f,
     const double V_0,                
     ViewType& U,

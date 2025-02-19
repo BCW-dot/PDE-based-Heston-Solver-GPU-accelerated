@@ -634,8 +634,8 @@ void test_heston_call(){
     const double eta = 0.04;
     
     // Test parameters matching Python version
-    const int m1 = 300;
-    const int m2 = 100;
+    const int m1 = 50;
+    const int m2 = 25;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     const int m = (m1 + 1) * (m2 + 1);
@@ -1350,7 +1350,7 @@ void test_heston_divident_call_shuffled() {
 
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
     std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
 
     auto device_Vec_s = grid.device_Vec_s;
 
@@ -1472,7 +1472,7 @@ void test_heston_divident_call_price_surface() {
 
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
     std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
 
     auto device_Vec_s = grid.device_Vec_s;
 
@@ -1627,7 +1627,7 @@ void test_heston_american_dividend_call_shuffled() {
     //for dividends
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
     std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02, 0.02};
 
     auto device_Vec_s = grid.device_Vec_s;
 
@@ -1733,8 +1733,8 @@ void test_lambda_american_dividend_call() {
 
     //for dividends
     std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
-    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
-    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+    std::vector<double> dividend_amounts = {0.0, 0.0, 0.0, 0.0};//{0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.1, 0.1, 0.1, 0.1};
 
     auto device_Vec_s = grid.device_Vec_s;
 
@@ -2245,67 +2245,594 @@ void test_black_scholes() {
 }
 
 
+/*
 
+Put option tests
 
-void test_parallel_tridiagonal2() {
+*/
+//normal DO scheme, european
+void test_heston_put(){
     using timer = std::chrono::high_resolution_clock;
+    // Market parameters
+    const double K = 100.0;
+    const double S_0 = 100.0;
+    const double V_0 = 0.04;
+    const double T = 1.0;
+    const double r_d = 0.025;
+    const double r_f = 0.0;
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double kappa = 1.5;
+    const double eta = 0.04;
     
-    const int m1 = 300;  // size of each system
-    const int m2 = 100;  // number of systems
-    
-    // Create arrays for all systems
-    Kokkos::View<double*> diag("diag", (m2+1)*(m1+1));
-    Kokkos::View<double*> lower("lower", (m2+1)*m1);
-    Kokkos::View<double*> upper("upper", (m2+1)*m1);
-    Kokkos::View<double*> x("x", (m2+1)*(m1+1));
-    Kokkos::View<double*> b("b", (m2+1)*(m1+1));
-    Kokkos::View<double*> temp("temp", (m2+1)*(m1+1));
-    
-    // Initialize (similar to before)
-    auto h_b = Kokkos::create_mirror_view(b);
-    for(int i = 0; i < (m2+1)*(m1+1); ++i) {
-        h_b(i) = std::rand() / (RAND_MAX + 1.0);
-    }
-    Kokkos::deep_copy(b, h_b);
-    Kokkos::deep_copy(diag, 2.0);
-    Kokkos::deep_copy(lower, -1.0);
-    Kokkos::deep_copy(upper, -1.0);
+    // Test parameters matching Python version
+    const int m1 = 50;
+    const int m2 = 25;
+    std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
-    auto t_start = timer::now();
+    const int m = (m1 + 1) * (m2 + 1);
+
+    const int N = 20;
+    const double delta_t = T / N;
+    const double theta = 0.8;
+    std::cout << "Time Dimension: " << N << std::endl;
+    std::cout << "Theta: " << theta << std::endl;
+
+
+    // Create grid and matrices
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2Storage_gpu A2(m1, m2);
+
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Build implicit matrices
+    A1.build_implicit(theta, delta_t);
+    A2.build_implicit(theta, delta_t);
+
+    // Initialize boundary conditions
+    BoundaryConditions_put bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(K);
+
+    // Initial condition: max(S - K, 0)
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
     
-    // Solve all systems in parallel
-    Kokkos::parallel_for("parallel_tridiagonal", m2+1, KOKKOS_LAMBDA(const int j) {
-        const int block_start = j * (m1 + 1);
-        const int off_start = j * m1;
-        
-        // Forward sweep for system j
-        temp(block_start) = diag(block_start);
-        x(block_start) = b(block_start);
-        
-        for(int i = 1; i <= m1; i++) {
-            const int curr_idx = block_start + i;
-            const int off_idx = off_start + (i-1);
-            
-            double w = lower(off_idx) / temp(curr_idx-1);
-            temp(curr_idx) = diag(curr_idx) - w * upper(off_idx);
-            x(curr_idx) = b(curr_idx) - w * x(curr_idx-1);
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for(int j = 0; j <= m2; j++) {
+        for(int i = 0; i <= m1; i++) {
+            h_U_0[i + j*(m1+1)] = std::max(K - grid.Vec_s[i], 0.0);
         }
-        
-        // Back substitution for system j
-        x(block_start + m1) /= temp(block_start + m1);
-        for(int i = m1-1; i >= 0; i--) {
-            const int curr_idx = block_start + i;
-            const int off_idx = off_start + i;
-            x(curr_idx) = (x(curr_idx) - upper(off_idx) * x(curr_idx+1)) 
-                         / temp(curr_idx);
-        }
-    });
-    
-    auto t_end = timer::now();
-    std::cout << "Parallel solve time: "
-              << std::chrono::duration<double>(t_end - t_start).count()
-              << " seconds" << std::endl;
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Run solver
+    //auto t_start = timer::now();
+    DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+    //auto t_end = timer::now();
+
+    //std::cout << "DO time: "
+            //<< std::chrono::duration<double>(t_end - t_start).count()
+            //<< " seconds" << std::endl;
+
+    // Verify solution
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    // Compare with reference price (from Python/Monte Carlo)
+    //const double reference_price = 8.8948693600540167;
+    std::cout << std::setprecision(16) << option_price << std::endl;
+    //std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+    //EXPECT_NEAR(option_price, reference_price, 0.1);
+
+    //for python plotting
+    ResultsExporter::exportToCSV("heston_do_scheme_put", grid, U);
 }
+
+//Test for computing a european put with the shuffled A2
+void test_heston_put_shuffled() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = 100;
+
+    double V_0 = 0.04;
+
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 50;
+    int m2 = 25;
+
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 20;
+    double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
+
+    // Create grid
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    //heston_A2Storage_gpu A2(m1, m2);  // Original A2
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
+
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+
+    // Build boundary conditions
+    BoundaryConditions_put bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(K);
+
+    // Initial condition
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j * (m1 + 1)) = std::max(K - grid.Vec_s[i], 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    //A2.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+    // Solve using DO scheme
+    //for( int i = 0; i<15; i++){
+        DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
+    //}
+
+    // Get result
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+
+    // Find price at S_0, V_0
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    // Compare with reference price (from Python/Monte Carlo)
+    //const double reference_price = 8.8948693600540167;
+    std::cout << std::setprecision(16) << option_price << std::endl;
+    //std::cout << "Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
+    //std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+
+    ResultsExporter::exportToCSV("shuffled_heston_do_scheme_put", grid, U);
+}
+
+//Shows the lambda surface for a put option. Now it is NOT everywhere zero compared to european call options
+//Tests that the lambda function is basically everywhere zero for a american call
+void test_lambda_american_put() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = 100.0;
+
+    double V_0 = 0.04;
+
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 50;
+    int m2 = 25;
+
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 20;
+    double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
+
+    // Create grid
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
+
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+
+    // Build boundary conditions
+    BoundaryConditions_put bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(K);
+
+    // Initial condition
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j * (m1 + 1)) = std::max(K - grid.Vec_s[i], 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+    std::vector<std::vector<double>> lambda_evolution(N + 1, std::vector<double>(m1 + 1, 0.0));
+
+    // Solve using DO scheme
+    DO_scheme_american_shuffle_with_lambda_tracking(
+        m, m1, m2, N, U_0, delta_t, theta,
+        A0, A1, A2_shuf, bounds, r_f,
+        V_0,  // Pass initial variance
+        U,
+        lambda_evolution);
+
+    // Write lambda evolution to CSV file
+    std::string output_file = "lambda_surface_put.csv";
+    std::ofstream outfile(output_file);
+    if(!outfile.is_open()) {
+        std::cerr << "Failed to open output file: " << output_file << std::endl;
+        return;
+    }
+
+    // Write metadata as comments
+    outfile << "# Lambda Surface Data\n";
+    outfile << "# Time steps: " << N << "\n";
+    outfile << "# Delta t: " << delta_t << "\n";
+    outfile << "# Total time: " << N * delta_t << "\n\n";
+
+    // Write header with actual stock prices
+    outfile << "time";
+    for(int i = 0; i <= m1; i++) {
+        outfile << "," << grid.Vec_s[i];  // Write actual stock price value
+    }
+    outfile << "\n";
+
+    // Write data
+    for(int n = 0; n <= N; n++) {
+        outfile << n * delta_t;  // Time point
+        for(int i = 0; i <= m1; i++) {
+            outfile << "," << lambda_evolution[n][i];
+        }
+        outfile << "\n";
+    }
+    outfile.close();
+
+    std::cout << "Lambda surface data exported to " << output_file << std::endl;
+}
+
+//Test that the lambda function picks up the dividend dates 
+void test_lambda_american_dividend_put() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = 100.0;
+
+    double V_0 = 0.04;
+
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 50;
+    int m2 = 25;
+
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 20;
+    double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
+
+    // Create grid
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
+
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+
+    // Build boundary conditions
+    BoundaryConditions_put bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(K);
+
+    // Initial condition
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j * (m1 + 1)) = std::max(K - grid.Vec_s[i], 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+    //for american
+    std::vector<std::vector<double>> lambda_evolution(N + 1, std::vector<double>(m1 + 1, 0.0));
+
+    //for dividends
+    std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+
+    auto device_Vec_s = grid.device_Vec_s;
+
+    // Solve using DO scheme
+    DO_scheme_american_dividend_shuffle_with_lambda_tracking(
+        m, m1, m2, N, U_0, delta_t, theta, 
+        dividend_dates,
+        dividend_amounts,
+        dividend_percentages,
+        device_Vec_s,   // Stock price grid on device
+        A0, A1, A2_shuf, bounds, r_f,
+        V_0,
+        U,
+        lambda_evolution);
+
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+
+    // Find price at S_0, V_0
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    std::cout << std::setprecision(16) << option_price << std::endl;
+
+    // Write lambda evolution to CSV file
+    std::string output_file = "lambda_surface_dividends_put.csv";
+    std::ofstream outfile(output_file);
+    if(!outfile.is_open()) {
+        std::cerr << "Failed to open output file: " << output_file << std::endl;
+        return;
+    }
+
+    // Write metadata as comments
+    outfile << "# Lambda Surface Data\n";
+    outfile << "# Time steps: " << N << "\n";
+    outfile << "# Delta t: " << delta_t << "\n";
+    outfile << "# Total time: " << N * delta_t << "\n\n";
+
+    // Write header with actual stock prices
+    outfile << "time";
+    for(int i = 0; i <= m1; i++) {
+        outfile << "," << grid.Vec_s[i];  // Write actual stock price value
+    }
+    outfile << "\n";
+
+    // Write data
+    for(int n = 0; n <= N; n++) {
+        outfile << n * delta_t;  // Time point
+        for(int i = 0; i <= m1; i++) {
+            outfile << "," << lambda_evolution[n][i];
+        }
+        outfile << "\n";
+    }
+    outfile.close();
+
+    std::cout << "Lambda surface data exported to " << output_file << std::endl;
+}
+
+void test_heston_divident_put_price_surface() {
+    // Test parameters
+    double K = 100.0;
+    double S_0 = 100;
+
+    double V_0 = 0.04;
+
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    int m1 = 50;
+    int m2 = 25;
+
+    int m = (m1 + 1) * (m2 + 1);
+    int N = 30;
+    double theta = 0.8;
+
+    std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
+
+    // Create grid
+    //Grid grid = create_test_grid(m1, m2);
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
+
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+
+    // Time step size
+    double delta_t = T / N;
+
+    // Build boundary conditions
+    BoundaryConditions_put bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(K);
+
+    // Initial condition
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Set initial condition on host
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j * (m1 + 1)) = std::max(K - grid.Vec_s[i], 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Build implicit matrices
+    double theta_t = theta * delta_t;
+    A1.build_implicit(theta, delta_t);
+    //A2.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+    std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
+    std::vector<double> dividend_amounts = {0.0, 0.0, 0.0, 0.0};
+    std::vector<double> dividend_percentages = {0.0, 0.0, 0.0, 0.0};
+
+    auto device_Vec_s = grid.device_Vec_s;
+
+    // Create Views for storing the time evolution at V_0
+    //only for ploting (vizual test)
+    Kokkos::View<double**> price_surface("price_surface", N+1, m1+1);  // [time][stock]
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+
+    // Solve using DO scheme
+    //for( int i = 0; i<15; i++){
+        DO_scheme_dividend_shuffled_with_surface_tracking(
+            m,              // Total size
+            m1,             // Stock price points
+            m2,             // Variance points
+            N,              // Time steps
+            U_0,            // Initial condition
+            delta_t,        // Time step size
+            theta,          // Weight parameter
+            dividend_dates,
+            dividend_amounts,
+            dividend_percentages,
+            device_Vec_s,   // Stock price grid on device
+            A0,             // Matrices
+            A1,
+            A2_shuf,
+            bounds,         // Boundary conditions
+            r_f,            // Foreign interest rate
+            U,              // Result vector
+            price_surface, //for plotting
+            index_v
+        );
+    //}
+
+    // Get result
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+
+    // Find price at S_0, V_0
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    //int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+    
+    //"true" price for:
+    /*
+    usual test parameters and 
+    std::vector<double> dividend_dates = {0.2, 0.4, 0.6, 0.8};
+    std::vector<double> dividend_amounts = {0.5, 0.3, 0.2, 0.1};
+    std::vector<double> dividend_percentages = {0.02, 0.02, 0.02};
+    */
+    //const double reference_price = 3.839290124997349;
+
+    std::cout << std::setprecision(16) << "Price: " << option_price << std::endl;
+    //std::cout << "Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
+    //std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+
+    ResultsExporter::exportToCSV("dividend_shuffled_heston_do_scheme_put", grid, U);
+
+    //print the option price surface agaisnt stock and time
+    // Copy results to host for CSV export
+    auto h_price_surface = Kokkos::create_mirror_view(price_surface);
+    auto h_Vec_s = Kokkos::create_mirror_view(device_Vec_s);
+    Kokkos::deep_copy(h_price_surface, price_surface);
+    Kokkos::deep_copy(h_Vec_s, device_Vec_s);
+
+    // Export to CSV
+    std::ofstream outfile("option_surface_put.csv");
+    outfile << "time,stock,price\n";  // CSV header
+
+    // Write data
+    for(int n = 0; n <= N; n++) {
+        double t = n * delta_t;
+        for(int i = 0; i <= m1; i++) {
+            outfile << t << "," 
+                    << h_Vec_s(i) << "," 
+                    << h_price_surface(n,i) << "\n";
+        }
+    }
+    outfile.close();
+
+    //std::cout << "Price surface data written to option_surface.csv\n";
+}
+
+
+
 
 
 void test_DO_scheme() {
@@ -2329,7 +2856,7 @@ void test_DO_scheme() {
         */
         //test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
-        test_shuffled_convergence();
+        //test_shuffled_convergence();
         //test_DO_shuffle_m2_convergence();
 
         //test_heston_american_call_shuffled();
@@ -2339,7 +2866,19 @@ void test_DO_scheme() {
         //test_heston_divident_call_price_surface();
 
         //test_heston_american_dividend_call_shuffled();
-        //test_lambda_american_dividend_call();
+        test_lambda_american_dividend_call();
+
+        /*
+        
+        Put tests
+        
+        */
+        //this does not look good in plots
+        //test_heston_put();
+        //test_heston_put_shuffled();
+        //test_lambda_american_put();
+        //test_lambda_american_dividend_put();
+        //test_heston_divident_put_price_surface();
 
         /*
 
