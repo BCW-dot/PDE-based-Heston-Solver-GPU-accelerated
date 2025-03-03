@@ -21,6 +21,8 @@
 #include "jacobian_computation.hpp"
 #include "heston_calibration.hpp"
 
+#include "MC_hes.hpp"
+
 
 #include <iostream>
 
@@ -67,6 +69,9 @@ int main(int argc, char* argv[]) {
     //test_device_class();
     //test_heston_calibration();
     //test_jacobian_computation();
+
+    //test a monte carlo pricer
+    //test_Monte_Carlo_Heston();
 
     //test_kokkos_kernels();
     std::cout << "Tests have completed successfully." << std::endl;

@@ -109,6 +109,60 @@ Grid create_test_grid(int m1, int m2) {
    return Grid(m1, S, S_0, K, c, m2, V, V_0, d);
 }
 
+Grid create_uniform_grid(int m1, int m2, double S_0, double V_0, double S_min, double S_max, 
+    double V_min, double V_max) {
+        
+    // Create vectors to hold the grid points and deltas
+    std::vector<double> Vec_s(m1 + 1);
+    std::vector<double> Delta_s(m1);
+    std::vector<double> Vec_v(m2 + 1);
+    std::vector<double> Delta_v(m2);
+
+    // Compute uniform spacing
+    double ds = (S_max - S_min) / m1;
+    double dv = (V_max - V_min) / m2;
+
+    // Fill the stock price grid
+    for (int i = 0; i <= m1; i++) {
+        Vec_s[i] = S_min + i * ds;
+    }
+
+    // Fill the variance grid
+    for (int j = 0; j <= m2; j++) {
+        Vec_v[j] = V_min + j * dv;
+    }
+    
+    // Add S_0 to the stock price grid
+    Vec_s.push_back(S_0);
+    std::sort(Vec_s.begin(), Vec_s.end());
+    // Remove the last element to maintain size
+    Vec_s.pop_back();
+    
+    // Add V_0 to the variance grid
+    Vec_v.push_back(V_0);
+    std::sort(Vec_v.begin(), Vec_v.end());
+    // Remove the last element to maintain size
+    Vec_v.pop_back();
+
+    // Recompute deltas (differences between adjacent points)
+    for (int i = 0; i < m1; i++) {
+        Delta_s[i] = Vec_s[i + 1] - Vec_s[i];
+    }
+
+    for (int j = 0; j < m2; j++) {
+        Delta_v[j] = Vec_v[j + 1] - Vec_v[j];
+    }
+
+    // Create a Grid struct and manually set its members
+    Grid grid;
+    grid.Vec_s = Vec_s;
+    grid.Delta_s = Delta_s;
+    grid.Vec_v = Vec_v;
+    grid.Delta_v = Delta_v;
+
+    return grid;
+}
+
 //this test waas checked against the python implementation from vizual outputs
 void test_grid(){
     // Example parameters

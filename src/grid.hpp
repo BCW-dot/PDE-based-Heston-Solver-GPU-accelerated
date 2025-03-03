@@ -24,5 +24,7 @@ struct Grid {
 
 // Helper function to create test grid
 Grid create_test_grid(int m1, int m2);
+Grid create_uniform_grid(int m1, int m2, double S_0, double V_0, double S_min = 0.0, double S_max = 800.0, 
+    double V_min = 0.0, double V_max = 5.0);
 
 void test_grid();

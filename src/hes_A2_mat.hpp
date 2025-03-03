@@ -490,7 +490,7 @@ inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x,
     Kokkos::fence();
 }
 
-
+/*
 inline void shuffle_vector(const Kokkos::View<double*>& input, 
                          Kokkos::View<double*>& output,
                          const int m1, 
@@ -500,5 +500,39 @@ inline void unshuffle_vector(const Kokkos::View<double*>& input,
                               Kokkos::View<double*>& output,
                               const int m1, 
                               const int m2);
+*/
+
+// Helper functions for shuffling
+inline void shuffle_vector(const Kokkos::View<double*>& input, 
+    Kokkos::View<double*>& output,
+    const int m1, 
+    const int m2) {
+    // Shuffles from [v0(s0,s1,...), v1(s0,s1,...), ...] 
+    // to [s0(v0,v1,...), s1(v0,v1,...), ...]
+    Kokkos::parallel_for("shuffle", m1 + 1, KOKKOS_LAMBDA(const int i) {
+        for(int j = 0; j <= m2; j++) {
+        // From original idx = j*(m1+1) + i 
+        // To shuffled idx = i*(m2+1) + j
+        output(i*(m2+1) + j) = input(j*(m1+1) + i);
+        }
+    });
+    Kokkos::fence();
+}
+
+inline void unshuffle_vector(const Kokkos::View<double*>& input, 
+         Kokkos::View<double*>& output,
+         const int m1, 
+         const int m2) {
+    // Shuffles from [s0(v0,v1,...), s1(v0,v1,...), ...] 
+    // back to [v0(s0,s1,...), v1(s0,s1,...), ...]
+    Kokkos::parallel_for("shuffle_back", m1 + 1, KOKKOS_LAMBDA(const int i) {
+        for(int j = 0; j <= m2; j++) {
+        // From shuffled idx = i*(m2+1) + j
+        // To original idx = j*(m1+1) + i
+        output(j*(m1+1) + i) = input(i*(m2+1) + j);
+        }
+    });
+    Kokkos::fence();
+}
 
 void test_heston_A2_mat();

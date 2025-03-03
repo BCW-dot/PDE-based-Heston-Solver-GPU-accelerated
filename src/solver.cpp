@@ -339,7 +339,9 @@ public:
         int m2 = fixed_m2;
         
         int m = (m1 + 1) * (m2 + 1);
+        
         Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+        //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
         
         // Initialize all matrices including shuffled A2
         heston_A0Storage_gpu A0(m1, m2);
@@ -374,7 +376,7 @@ public:
         }
         Kokkos::deep_copy(U_0, h_U_0);
 
-        int repeats = 50;
+        int repeats = 5;
         double totalTime = 0.0;
 
         for (int i = 0; i < repeats; i++) {
@@ -434,7 +436,9 @@ public:
             std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
             
             int m = (m1 + 1) * (m2 + 1);
+            
             Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
             
             // Initialize matrices including shuffled A2
             heston_A0Storage_gpu A0(m1, m2);
@@ -469,7 +473,7 @@ public:
             }
             Kokkos::deep_copy(U_0, h_U_0);
 
-            int repeats = 50;
+            int repeats = 5;
             double totalTime = 0.0;
 
             for (int i = 0; i < repeats; i++) {
@@ -527,6 +531,7 @@ public:
             int m = (m1 + 1) * (m2 + 1);
 
             Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
             
             heston_A0Storage_gpu A0(m1, m2);
             heston_A1Storage_gpu A1(m1, m2);
@@ -634,8 +639,8 @@ void test_heston_call(){
     const double eta = 0.04;
     
     // Test parameters matching Python version
-    const int m1 = 50;
-    const int m2 = 25;
+    const int m1 = 100;
+    const int m2 = 75;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     const int m = (m1 + 1) * (m2 + 1);
@@ -801,7 +806,7 @@ Shuffled DO scheme tests
 void test_heston_call_shuffled() {
     // Test parameters
     double K = 100.0;
-    double S_0 = 100;
+    double S_0 = 100.0;
 
     double V_0 = 0.04;
 
@@ -815,8 +820,8 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 50;
-    int m2 = 25;
+    int m1 = 200;
+    int m2 = 100;
 
     int m = (m1 + 1) * (m2 + 1);
     int N = 20;
@@ -827,6 +832,8 @@ void test_heston_call_shuffled() {
     // Create grid
     //Grid grid = create_test_grid(m1, m2);
     Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+    //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
 
     // Initialize matrices
     heston_A0Storage_gpu A0(m1, m2);
@@ -879,6 +886,7 @@ void test_heston_call_shuffled() {
     // Find option price at S_0 and V_0
     int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
     int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+
     double option_price = h_U[index_s + index_v*(m1+1)];
 
     // Compare with reference price (from Python/Monte Carlo)
@@ -1047,7 +1055,7 @@ void test_shuffled_convergence() {
     const double ref_price = 8.8948693600540167;
     
     // Test m1 convergence
-    std::vector<int> m1_sizes = {50, 75, 100, 150, 200, 250, 300};
+    std::vector<int> m1_sizes = {50, 75, 100, 150, 201, 250, 300};
     int fixed_m2 = 100;
     auto data_m1 = ConvergenceExporter::testFixedM2VaryM1_shuffled(
         fixed_m2, m1_sizes, ref_price,
@@ -2250,6 +2258,7 @@ void test_black_scholes() {
 Put option tests
 
 */
+/*
 //normal DO scheme, european
 void test_heston_put(){
     using timer = std::chrono::high_resolution_clock;
@@ -2833,7 +2842,7 @@ void test_lambda_american_dividend_put() {
 
     std::cout << "Lambda surface data exported to " << output_file << std::endl;
 }
-
+*/
 
 
 
@@ -2862,14 +2871,14 @@ void test_DO_scheme() {
         //test_shuffled_convergence();
         //test_DO_shuffle_m2_convergence();
 
-        //test_heston_american_call_shuffled();
-        //test_lambda_american_call();
+        test_heston_american_call_shuffled();
+        test_lambda_american_call();
 
-        //test_heston_divident_call_shuffled();
-        //test_heston_divident_call_price_surface();
+        test_heston_divident_call_shuffled();
+        test_heston_divident_call_price_surface();
 
-        //test_heston_american_dividend_call_shuffled();
-        //test_lambda_american_dividend_call();
+        test_heston_american_dividend_call_shuffled();
+        test_lambda_american_dividend_call();
 
         /*
         
@@ -2879,7 +2888,7 @@ void test_DO_scheme() {
         //this does not look good in plots
         //test_heston_put();
         //test_heston_put_shuffled();
-        test_lambda_american_put();
+        //test_lambda_american_put();
         //test_heston_divident_put_price_surface();
         //test_lambda_american_dividend_put();
 

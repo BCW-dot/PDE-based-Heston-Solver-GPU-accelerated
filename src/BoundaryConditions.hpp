@@ -100,7 +100,7 @@ public:
     int get_size() const { return m_; }
 };
 
-
+/*
 class BoundaryConditions_put {
     private:
         // Member views to store boundary values
@@ -179,7 +179,7 @@ class BoundaryConditions_put {
     
         int get_size() const { return m_; }
 };
-
+*/
 
 void test_boundary_conditions();
 

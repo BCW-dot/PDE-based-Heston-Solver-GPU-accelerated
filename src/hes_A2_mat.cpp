@@ -57,9 +57,6 @@ void heston_A2Storage_gpu::build_matrix(const Grid& grid, double rho, double sig
         h_upper2(i) += temp * gamma_v(0, 2, grid.Delta_v);
     }
     
-    
-
-    
     // Handle remaining j values
     for(int j = 1; j < m2-1; j++) {
         for(int i = 0; i < m1+1; i++) {
@@ -74,21 +71,6 @@ void heston_A2Storage_gpu::build_matrix(const Grid& grid, double rho, double sig
             
             // Upper diagonal index - aligns with main diagonal
             int upper_idx = main_idx;
-
-            /*
-            if(grid.Vec_v[j] > 1.0) {
-                // Using l_9a = [-2,-1,0] for upwind scheme
-                h_lower2.push_back();
-                h_lower[] += temp * alpha_v(j, -2, grid.Delta_v);
-                h_main[] += temp * alpha_v(j, -1, grid.Delta_v);
-                h_upper[] += temp * alpha_v(j, 0, grid.Delta_v);
-
-                // Add regular central differences
-                h_lower[lower_idx] += temp2 * delta_v(j-1, -1, grid.Delta_v);
-                h_main[main_idx] += temp2 * delta_v(j-1, 0, grid.Delta_v);
-                h_upper[upper_idx] += temp2 * delta_v(j-1, 1, grid.Delta_v);
-            } 
-            */
             
             //else {
                 // Standard central difference scheme l_10 = [-1, 0, 1]
@@ -796,6 +778,7 @@ making sure shuffle and the original A2 matrix perfom the same computations
 
 */
 // Helper functions for shuffling
+/*
 inline void shuffle_vector(const Kokkos::View<double*>& input, 
                          Kokkos::View<double*>& output,
                          const int m1, 
@@ -827,6 +810,7 @@ inline void unshuffle_vector(const Kokkos::View<double*>& input,
     });
     Kokkos::fence();
 }
+*/
 
 //this computes the difference in explcicit and implicit between A2 and A2_shuffled
 void compare_A2_implementations() {

@@ -614,8 +614,8 @@ void test_deviceCallable_Do_solver() {
     const double eta = 0.04;
     
     // Parameters
-    const int m1 = 300;
-    const int m2 = 100;
+    const int m1 = 50;
+    const int m2 = 25;
 
     const int nInstances = 20;
 
@@ -723,7 +723,7 @@ void test_deviceCallable_Do_solver() {
     auto t_start = timer::now();
 
     // Main kernel launch with modified internals
-    Kokkos::parallel_for("DO_scheme", policy,
+    Kokkos::parallel_for("DO_scheme_device", policy,
         KOKKOS_LAMBDA(const team_policy::member_type& team) {
             const int instance = team.league_rank();
             

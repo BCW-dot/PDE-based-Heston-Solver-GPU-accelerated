@@ -38,19 +38,10 @@ void test_calibration_european(){
     // Current parameter set
     const double V_0 = 0.04;
     
-    
     const double rho = -0.9;
     const double sigma = 0.3;
     const double kappa = 1.5;
     const double eta = 0.04;
-    
-   
-   /*
-    const double rho = 0.03;
-    const double sigma = 0.02;
-    const double kappa = 3.0;
-    const double eta = 0.01;
-    */
     
     
     // Numerical parameters
@@ -61,10 +52,10 @@ void test_calibration_european(){
     const double theta = 0.8;
     const double delta_t = T/N;
 
-    const double eps = 1e-6;  // Perturbation size
+    const double eps = 1e-6;  // Perturbation size for finite difference approximation in Jacobian matrix
 
     // Setup strikes and market data
-    const int num_strikes = 5;
+    const int num_strikes = 30;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
@@ -77,9 +68,8 @@ void test_calibration_european(){
     const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
 
-
     std::cout << "Computing Jacobian for " << num_strikes << " strikes\n";
-    std::cout << "Total PDE solves: " << num_strikes * (6 + 1) << std::endl; //base_price + param_pertubation + new error computation
+    std::cout << "Total PDE solves per iteration: " << num_strikes * (1 + 5 + 1) << std::endl; //base_price + param_pertubation + new error computation
     std::cout << "Base parameters: kappa=" << kappa << ", eta=" << eta 
               << ", sigma=" << sigma << ", rho=" << rho << ", V_0=" << V_0 << "\n";
     std::cout << "Tolerance: " << tol << std::endl;
@@ -215,9 +205,9 @@ void test_calibration_european(){
     
     
     // Main iteration loop
+    auto iter_start = timer::now();
     for(int iter = 0; iter < max_iter && !converged; iter++) {
-        auto iter_start = timer::now();
-        std::cout << "\nIteration " << iter + 1 << " of " << max_iter << std::endl;
+        //std::cout << "\nIteration " << iter + 1 << " of " << max_iter << std::endl;
 
         //std::cout << "Current parameters: κ=" << current_kappa 
                 //<< ", η=" << current_eta 
@@ -438,6 +428,7 @@ void test_calibration_european(){
     std::cout << "v₀ = " << current_v0 << std::endl;
     std::cout << "final error = " << final_error << std::endl;
     std::cout << "total iterations = " << iteration_count << std::endl;
+    std::cout << "Total PDE solves: " << num_strikes * (1 + 5 + 1) * iteration_count << std::endl;
 
     auto t_end_second = timer::now();
     std::cout << "Total time after Updating parameters: "
@@ -520,6 +511,8 @@ void test_calibration_european(){
     out.close();
     std::cout << "Exported final results to " << csv_filename << std::endl;
 }
+
+
 
 //This calibrates to american call options
 void test_calibration_american(){
@@ -715,8 +708,8 @@ void test_calibration_american(){
     
     
     // Main iteration loop
+    auto iter_start = timer::now();
     for(int iter = 0; iter < max_iter && !converged; iter++) {
-        auto iter_start = timer::now();
         std::cout << "\nIteration " << iter + 1 << " of " << max_iter << std::endl;
 
         //std::cout << "Current parameters: κ=" << current_kappa 
@@ -1263,8 +1256,8 @@ void test_calibration_dividends(){
     
     
     // Main iteration loop
+    auto iter_start = timer::now();
     for(int iter = 0; iter < max_iter && !converged; iter++) {
-        auto iter_start = timer::now();
         std::cout << "\nIteration " << iter + 1 << " of " << max_iter << std::endl;
 
         //std::cout << "Current parameters: κ=" << current_kappa 
@@ -1832,8 +1825,8 @@ void test_calibration_american_dividends(){
     
     
     // Main iteration loop
+    auto iter_start = timer::now();
     for(int iter = 0; iter < max_iter && !converged; iter++) {
-        auto iter_start = timer::now();
         std::cout << "\nIteration " << iter + 1 << " of " << max_iter << std::endl;
 
         //std::cout << "Current parameters: κ=" << current_kappa 
@@ -2167,12 +2160,11 @@ void test_calibration_american_dividends(){
 void test_heston_calibration(){
   Kokkos::initialize();
   {
-    //test_calibration_european();
+    test_calibration_european();
     //test_calibration_american();
     //test_calibration_dividends();
-    test_calibration_american_dividends();
+    //test_calibration_american_dividends();
 
   }
   Kokkos::finalize();
- 
 }
