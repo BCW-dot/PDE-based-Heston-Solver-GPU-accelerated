@@ -1334,6 +1334,173 @@ void compute_base_prices_american_dividends(
 }
 
 
+/*
+
+Purely device sideable calibration code
+
+*/
+/*
+template<class Device>
+KOKKOS_FUNCTION
+void device_compute_jacobian(
+    // Market/model parameters
+    const double S_0, const double V_0, const double T,
+    const double r_d, const double r_f,
+    const double rho, const double sigma, const double kappa, const double eta,
+    // Numerical parameters
+    const int m1, const int m2, const int total_size, const int N, const double theta, const double delta_t,
+    // Pre-computed data structures
+    const int num_strikes,
+    const Kokkos::View<Device_A0_heston<Device>*>& A0_solvers,
+    const Kokkos::View<Device_A1_heston<Device>*>& A1_solvers,
+    const Kokkos::View<Device_A2_shuffled_heston<Device>*>& A2_solvers,
+    const Kokkos::View<Device_BoundaryConditions<Device>*>& bounds_d,
+    const Kokkos::View<GridViews*>& deviceGrids,
+    const Kokkos::View<double**>& U_0,
+    const DO_Workspace<Device>& workspace,
+    // Output matrix
+    const Kokkos::View<double**>& J,
+    const Kokkos::View<double*>& base_prices,
+    // Optional: perturbation size
+    const double eps,
+    // Team handle for parallelism
+    const typename Kokkos::TeamPolicy<>::member_type& team
+) {
+    //Here i would have specified the team based parallsim to be accross strikes, this i dont have anymore
+
+    // Main Jacobian computation kernel 
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, num_strikes),
+        [&](const int strike_idx) {
+            
+            // Setup workspace views
+            auto U_i = Kokkos::subview(workspace.U, strike_idx, Kokkos::ALL);
+            auto Y_0_i = Kokkos::subview(workspace.Y_0, strike_idx, Kokkos::ALL);
+            auto Y_1_i = Kokkos::subview(workspace.Y_1, strike_idx, Kokkos::ALL);
+            auto A0_result_i = Kokkos::subview(workspace.A0_result, strike_idx, Kokkos::ALL);
+            auto A1_result_i = Kokkos::subview(workspace.A1_result, strike_idx, Kokkos::ALL);
+            auto A2_result_unshuf_i = Kokkos::subview(workspace.A2_result_unshuf, strike_idx, Kokkos::ALL);
+            
+            auto U_shuffled_i = Kokkos::subview(workspace.U_shuffled, strike_idx, Kokkos::ALL);
+            auto Y_1_shuffled_i = Kokkos::subview(workspace.Y_1_shuffled, strike_idx, Kokkos::ALL);
+            auto A2_result_shuffled_i = Kokkos::subview(workspace.A2_result_shuffled, strike_idx, Kokkos::ALL);
+            auto U_next_shuffled_i = Kokkos::subview(workspace.U_next_shuffled, strike_idx, Kokkos::ALL);
+
+            auto U_0_i = Kokkos::subview(U_0, strike_idx, Kokkos::ALL);  // Get initial condition
+
+            GridViews grid_i = deviceGrids(strike_idx);
+
+            grid_i.rebuild_variance_views(V_0, 5.0, 5.0/500, team);
+            
+            bounds_d(strike_idx).initialize(grid_i, team);
+            auto bounds = bounds_d(strike_idx);
+            
+            A0_solvers(strike_idx).build_matrix(grid_i, rho, sigma, team);
+            A1_solvers(strike_idx).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+            A2_solvers(strike_idx).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
+
+            device_DO_timestepping<Device, decltype(U_i)>(
+                m1, m2, N, delta_t, theta, r_f,
+                A0_solvers(strike_idx), A1_solvers(strike_idx), A2_solvers(strike_idx),
+                bounds,
+                U_i, Y_0_i, Y_1_i,
+                A0_result_i, A1_result_i, A2_result_unshuf_i,
+                U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
+                team
+            );
+            
+            //The s direction can be precomputed
+            // Get indices for price extraction
+            // Find s index
+            int index_s = -1;
+            //int index_v = -1;
+            for(int i = 0; i <= m1; i++) {
+                if(Kokkos::abs(grid_i.device_Vec_s(i) - S_0) < 1e-10) {
+                    index_s = i;  // Store s index
+                    break;
+                }
+            }
+            const int index_v = grid_i.find_v0_index(V_0);
+
+            // Now you can use these indices directly
+            const double base_price = U_i(index_s + index_v*(m1+1));
+            base_prices(strike_idx) = base_price;
+
+            // Loop over parameters for finite differences, this excludes v0 in the loop and treats it seperately
+            //same result of course but surprisingly not a whole lot faster
+            for(int param = 0; param < 4; param++) {
+                // Handle other parameters as before
+                double kappa_p = kappa;
+                double eta_p = eta;
+                double sigma_p = sigma;
+                double rho_p = rho;
+
+                switch(param) {
+                    case 0: kappa_p += eps; break;
+                    case 1: eta_p += eps; break;
+                    case 2: sigma_p += eps; break;
+                    case 3: rho_p += eps; break;
+                }
+
+                // Reset initial condition
+                for(int idx = 0; idx < total_size; idx++) {
+                    U_i(idx) = U_0_i(idx);
+                }
+
+                // Rebuild matrices with perturbed parameter
+                A0_solvers(strike_idx).build_matrix(grid_i, rho_p, sigma_p, team);
+                A1_solvers(strike_idx).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+                A2_solvers(strike_idx).build_matrix(grid_i, r_d, kappa_p, eta_p, sigma_p, theta, delta_t, team);
+
+                // Compute perturbed solution
+                device_DO_timestepping<Device, decltype(U_i)>(
+                    m1, m2, N, delta_t, theta, r_f,
+                    A0_solvers(strike_idx), A1_solvers(strike_idx), A2_solvers(strike_idx),
+                    bounds, U_i, Y_0_i, Y_1_i,
+                    A0_result_i, A1_result_i, A2_result_unshuf_i,
+                    U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
+                    team
+                );
+
+                // Store results
+                double pert_price = U_i(index_s + index_v*(m1+1));
+                //pert_prices(instance, param) = pert_price;
+                J(strike_idx, param) = (pert_price - base_price) / eps;
+            }
+            // Special handling for V0 (param == 4)
+            const int param = 4;
+            for(int idx = 0; idx < total_size; idx++) {
+                U_i(idx) = U_0_i(idx);
+            }
+
+            // Rebuild variance views with perturbed V0
+            //This will change the V direction views for everyone!
+            grid_i.rebuild_variance_views(V_0 + eps, 5.0, 5.0/500, team);
+            //new v index for option price
+            const int index_v_pertubed = grid_i.find_v0_index(V_0 + eps);
+            
+            // Rebuild matrices with updated grid
+            A0_solvers(strike_idx).build_matrix(grid_i, rho, sigma, team);
+            A1_solvers(strike_idx).build_matrix(grid_i, r_d, r_f, theta, delta_t, team);
+            A2_solvers(strike_idx).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
+
+            // Recompute solution
+            // Compute perturbed solution
+            device_DO_timestepping<Device, decltype(U_i)>(
+                m1, m2, N, delta_t, theta, r_f,
+                A0_solvers(strike_idx), A1_solvers(strike_idx), A2_solvers(strike_idx),
+                bounds, U_i, Y_0_i, Y_1_i,
+                A0_result_i, A1_result_i, A2_result_unshuf_i,
+                U_shuffled_i, Y_1_shuffled_i, A2_result_shuffled_i, U_next_shuffled_i,
+                team
+            );
+
+            // Get price and compute gradient
+            double pert_price = U_i(index_s + index_v_pertubed*(m1+1));
+            J(strike_idx, param) = (pert_price - base_price) / eps;
+        });
+        Kokkos::fence();
+}
+*/
 
 
 /*

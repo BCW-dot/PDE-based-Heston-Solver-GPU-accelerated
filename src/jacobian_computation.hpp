@@ -231,5 +231,38 @@ void compute_base_prices_american_dividends(
 );
 
 
+/*
+
+Purely Divce code
+
+*/
+template<class Device>
+KOKKOS_FUNCTION
+void device_compute_jacobian(
+    // Market/model parameters
+    const double S_0, const double V_0, const double T,
+    const double r_d, const double r_f,
+    const double rho, const double sigma, const double kappa, const double eta,
+    // Numerical parameters
+    const int m1, const int m2, const int total_size, const int N, const double theta, const double delta_t,
+    // Pre-computed data structures
+    const int num_strikes,
+    const Kokkos::View<Device_A0_heston<Device>*>& A0_solvers,
+    const Kokkos::View<Device_A1_heston<Device>*>& A1_solvers,
+    const Kokkos::View<Device_A2_shuffled_heston<Device>*>& A2_solvers,
+    const Kokkos::View<Device_BoundaryConditions<Device>*>& bounds_d,
+    const Kokkos::View<GridViews*>& deviceGrids,
+    const Kokkos::View<double**>& U_0,
+    const DO_Workspace<Device>& workspace,
+    // Output matrix
+    const Kokkos::View<double**>& J,
+    const Kokkos::View<double*>& base_prices,
+    // Optional: perturbation size
+    const double eps,
+    // Team handle for parallelism
+    const typename Kokkos::TeamPolicy<>::member_type& team
+);
+
+
 
 void test_jacobian_computation();
