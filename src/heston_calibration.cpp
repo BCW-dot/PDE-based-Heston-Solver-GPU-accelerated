@@ -2195,17 +2195,18 @@ void compute_jacobian_multi_maturity(
     // Output matrix
     Kokkos::View<double**>& J,
     Kokkos::View<double*>& base_prices,
+    const Kokkos::TeamPolicy<Kokkos::DefaultExecutionSpace>& policy,
     // Optional: perturbation size
     const double eps = 1e-6
 ) {
     // Create team policy for the total number of calibration points
-    using Device = Kokkos::DefaultExecutionSpace;
-    using team_policy = Kokkos::TeamPolicy<>;
-    team_policy policy(total_calibration_size, Kokkos::AUTO);
+    //using Device = Kokkos::DefaultExecutionSpace;
+    //using team_policy = Kokkos::TeamPolicy<>;
+    //team_policy policy(total_calibration_size, Kokkos::AUTO);
 
-    // Main Jacobian computation kernel 
+
     Kokkos::parallel_for("Jacobian_computation", policy,
-        KOKKOS_LAMBDA(const team_policy::member_type& team) {
+        KOKKOS_LAMBDA(const typename Kokkos::TeamPolicy<Kokkos::DefaultExecutionSpace>::member_type& team) {
             const int instance = team.league_rank();
             
             // Get calibration point data
@@ -2241,7 +2242,7 @@ void compute_jacobian_multi_maturity(
             A2_solvers(instance).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
     
             // Use instance-specific time steps and delta_t from calibration point
-            device_DO_timestepping<Device, decltype(U_i)>(
+            device_DO_timestepping<Kokkos::DefaultExecutionSpace, decltype(U_i)>(
                 m1, m2, N, delta_t, theta, r_f,
                 A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
                 bounds,
@@ -2290,7 +2291,7 @@ void compute_jacobian_multi_maturity(
                 A2_solvers(instance).build_matrix(grid_i, r_d, kappa_p, eta_p, sigma_p, theta, delta_t, team);
     
                 // Compute perturbed solution with maturity-specific time steps
-                device_DO_timestepping<Device, decltype(U_i)>(
+                device_DO_timestepping<Kokkos::DefaultExecutionSpace, decltype(U_i)>(
                     m1, m2, N, delta_t, theta, r_f,
                     A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
                     bounds, U_i, Y_0_i, Y_1_i,
@@ -2320,7 +2321,7 @@ void compute_jacobian_multi_maturity(
             A2_solvers(instance).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
     
             // Compute perturbed solution
-            device_DO_timestepping<Device, decltype(U_i)>(
+            device_DO_timestepping<Kokkos::DefaultExecutionSpace, decltype(U_i)>(
                 m1, m2, N, delta_t, theta, r_f,
                 A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
                 bounds, U_i, Y_0_i, Y_1_i,
@@ -2355,16 +2356,17 @@ void compute_base_prices_multi_maturity(
     const Kokkos::View<Device_BoundaryConditions<Kokkos::DefaultExecutionSpace>*>& bounds_d,
     const Kokkos::View<GridViews*>& deviceGrids,
     DO_Workspace<Kokkos::DefaultExecutionSpace>& workspace,
-    Kokkos::View<double*>& base_prices
+    Kokkos::View<double*>& base_prices,
+    const Kokkos::TeamPolicy<Kokkos::DefaultExecutionSpace>& policy
 ) {
-    using Device = Kokkos::DefaultExecutionSpace;
+    //using Device = Kokkos::DefaultExecutionSpace;
     // Create team policy
-    using team_policy = Kokkos::TeamPolicy<>;
-    team_policy policy(total_calibration_size, Kokkos::AUTO);
+    //using team_policy = Kokkos::TeamPolicy<>;
+    //team_policy policy(total_calibration_size, Kokkos::AUTO);
 
     // Main computation kernel 
     Kokkos::parallel_for("Base_Price_computation", policy,
-        KOKKOS_LAMBDA(const team_policy::member_type& team) {
+        KOKKOS_LAMBDA(const typename Kokkos::TeamPolicy<Kokkos::DefaultExecutionSpace>::member_type& team) {
             const int instance = team.league_rank();
             
             // Get calibration point data
@@ -2397,7 +2399,7 @@ void compute_base_prices_multi_maturity(
             A2_solvers(instance).build_matrix(grid_i, r_d, kappa, eta, sigma, theta, delta_t, team);
 
             // Use instance-specific time steps and delta_t
-            device_DO_timestepping<Device, decltype(U_i)>(
+            device_DO_timestepping<Kokkos::DefaultExecutionSpace, decltype(U_i)>(
                 m1, m2, N, delta_t, theta, r_f,
                 A0_solvers(instance), A1_solvers(instance), A2_solvers(instance),
                 bounds,
@@ -2457,15 +2459,15 @@ void test_calibration_european_multi_maturity(){
 
     // Setup maturity, strikes and market data
     //each maturity has the same amount of strikes and the same strike values
-    const int num_maturities = 5;
-    const int num_strikes = 30;
+    const int num_maturities = 3;
+    const int num_strikes = 50;
 
     const int total_calibration_size = num_maturities*num_strikes;
 
     std::vector<double> maturities(num_maturities);
     std::cout << "Maturities: ";
     for(int i = 0; i < num_maturities; ++i) {
-        maturities[i] = 0.5 + i * 0.5;
+        maturities[i] = 0.5 + i * 0.2;
         std::cout << maturities[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -2473,7 +2475,7 @@ void test_calibration_european_multi_maturity(){
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.8 + i * 0.1;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.8 + i * 1;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -2655,6 +2657,8 @@ void test_calibration_european_multi_maturity(){
     // Define bounds for updating
     static constexpr double rho_min = -1.0, rho_max = 1.0;
 
+    using team_policy = Kokkos::TeamPolicy<Device>;
+    team_policy my_policy(total_calibration_size, Kokkos::AUTO);    
 
     // Main iteration loop
     auto iter_start = timer::now();
@@ -2682,6 +2686,7 @@ void test_calibration_european_multi_maturity(){
             bounds_d, deviceGrids,
             U_0, workspace,
             J, base_prices,
+            my_policy,
             eps
         );
         
@@ -2758,7 +2763,8 @@ void test_calibration_european_multi_maturity(){
             A0_solvers, A1_solvers, A2_solvers,
             bounds_d, deviceGrids,
             workspace,
-            base_prices
+            base_prices,
+            my_policy
         );
 
         // Compute new residuals
