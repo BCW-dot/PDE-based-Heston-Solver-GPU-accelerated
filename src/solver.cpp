@@ -713,8 +713,7 @@ void test_heston_call(){
     const double reference_price = 8.8948693600540167;
     std::cout << std::setprecision(16) << option_price << std::endl;
     std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
-    //EXPECT_NEAR(option_price, reference_price, 0.1);
-
+    
     //for python plotting
     ResultsExporter::exportToCSV("heston_do_scheme", grid, U);
 }
@@ -812,7 +811,7 @@ Shuffled DO scheme tests
 void test_heston_call_shuffled() {
     // Test parameters
     double K = 100.0;
-    double S_0 = 110.0;
+    double S_0 = 100.0;
 
     double V_0 = 0.04;
 
@@ -826,7 +825,7 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 75;
+    int m1 = 50;
     int m2 = 25;
 
     int m = (m1 + 1) * (m2 + 1);
@@ -844,13 +843,11 @@ void test_heston_call_shuffled() {
     // Initialize matrices
     heston_A0Storage_gpu A0(m1, m2);
     heston_A1Storage_gpu A1(m1, m2);
-    //heston_A2Storage_gpu A2(m1, m2);  // Original A2
     heston_A2_shuffled A2_shuf(m1, m2);  // Shuffled A2
 
     // Build matrices
     A0.build_matrix(grid, rho, sigma);
     A1.build_matrix(grid, rho, sigma, r_d, r_f);
-    //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
     A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
     // Time step size
@@ -876,7 +873,6 @@ void test_heston_call_shuffled() {
     // Build implicit matrices
     double theta_t = theta * delta_t;
     A1.build_implicit(theta, delta_t);
-    //A2.build_implicit(theta, delta_t);
     A2_shuf.build_implicit(theta, delta_t);
 
     // Solve using DO scheme
@@ -904,6 +900,7 @@ void test_heston_call_shuffled() {
     ResultsExporter::exportToCSV("shuffled_heston_do_scheme", grid, U);
 }
 
+//convergence of shuffle vor varyieng m1 direction
 void test_heston_call_shuffled_vary_m1() {
     // Fixed parameters
     double K = 100.0;
@@ -1015,6 +1012,7 @@ void test_heston_call_shuffled_vary_m1() {
     }
 }
 
+//same as above just for m2
 void test_DO_shuffle_m2_convergence() {
     // Market parameters
     const double K = 100.0;
@@ -1041,6 +1039,7 @@ void test_DO_shuffle_m2_convergence() {
     ConvergenceExporter::exportToCSV("do_scheme_shuffle_m2", data_m2);
 }
 
+//does both directions
 void test_shuffled_convergence() {
     // Market parameters (same as before)
     const double K = 100.0;
@@ -1288,11 +1287,6 @@ void test_lambda_american_call() {
 
     std::cout << "Lambda surface data exported to " << output_file << std::endl;
 }
-
-//I implemented only discrete dividents here. So pricing options on a single underlying which pays frequent dividends
-//I did not implement a divident yield q whcih can be used to model continuously paid dividents. This is used for options
-//on indexes. This is not hard to implement, we only need to adjust the variable for A1 matrix for the first derivative 
-// to r_d - r_f - q. Since i am short on time, i did not do that (I would need to go over every A1 call i make in this project)
 
 //Test which computes a call price with a divident paying underlying
 void test_heston_divident_call_shuffled() {
@@ -1569,7 +1563,6 @@ void test_heston_divident_call_price_surface() {
     //std::cout << "Price surface data written to option_surface.csv\n";
 }
 
-
 //this Test computes the call price of an american option on a stock which pays dividends
 void test_heston_american_dividend_call_shuffled() {
     // Test parameters
@@ -1812,9 +1805,9 @@ void test_lambda_american_dividend_call() {
 /*
 
 CS scheme tests
+This is a different scheme which perfoms a corrector step to account for the missing implicit treatment of the A0 class
 
 */
-
 void test_CS_scheme_call(){
     //using timer = std::chrono::high_resolution_clock;
     // Market parameters
@@ -2169,93 +2162,6 @@ void test_CS_schuffled_implied_vol(){
     outfile.close();
 }
 
-void test_black_scholes() {
-    std::cout << "\nTesting Black-Scholes Implementation\n";
-    std::cout << "===================================\n\n";
-    
-    // Test parameters
-    double S = 100.0;  // Current stock price
-    double K = 100.0;  // Strike price
-    double r = 0.025;  // Risk-free rate
-    double T = 1.0;    // Time to maturity
-    double v = 0.3;    // Volatility
-    int CP = 1;        // Call option
-    
-    std::cout << "Parameters:\n";
-    std::cout << "Stock price (S): " << S << "\n";
-    std::cout << "Strike price (K): " << K << "\n";
-    std::cout << "Risk-free rate (r): " << r << "\n";
-    std::cout << "Time to maturity (T): " << T << "\n";
-    std::cout << "Volatility (v): " << v << "\n\n";
-    
-    // Test 1: Call price calculation
-    double call_price = BlackScholes::call_price(CP, S, K, r, v, T);
-    std::cout << "Test 1 - Call Price Calculation\n";
-    std::cout << "Call price: " << call_price << "\n";
-    // For ATM option with these parameters, price should be roughly 11-13
-    if (call_price > 11.0 && call_price < 13.0) {
-        std::cout << "✓ Price is in expected range\n\n";
-    } else {
-        std::cout << "✗ Price is outside expected range\n\n";
-    }
-    
-    // Test 2: Vega calculation
-    double vega = BlackScholes::call_vega(CP, S, K, r, v, T);
-    std::cout << "Test 2 - Vega Calculation\n";
-    std::cout << "Vega: " << vega << "\n";
-    // Vega should be positive and roughly 30-40 for ATM option
-    if (vega > 0 && vega < 50.0) {
-        std::cout << "✓ Vega is in expected range\n\n";
-    } else {
-        std::cout << "✗ Vega is outside expected range\n\n";
-    }
-    
-    // Test 3: Implied volatility calculation (reverse engineering)
-    double epsilon = 0.0001;
-    double test_vol = BlackScholes::reverse_BS(CP, S, K, r, T, 0.5, call_price, epsilon);
-    std::cout << "Test 3 - Implied Volatility Calculation\n";
-    std::cout << "Original volatility: " << v << "\n";
-    std::cout << "Calculated implied volatility: " << test_vol << "\n";
-    if (std::abs(test_vol - v) < epsilon) {
-        std::cout << "✓ Implied volatility matches original within tolerance\n\n";
-    } else {
-        std::cout << "✗ Implied volatility calculation failed\n\n";
-    }
-    
-    // Test 4: Edge cases
-    std::cout << "Test 4 - Edge Cases\n";
-    
-    // Deep ITM option
-    double itm_price = BlackScholes::call_price(CP, 150.0, K, r, v, T);
-    std::cout << "Deep ITM price (S=150): " << itm_price << "\n";
-    if (itm_price > 50.0) {  // Should be at least intrinsic value
-        std::cout << "✓ Deep ITM price is reasonable\n";
-    } else {
-        std::cout << "✗ Deep ITM price seems incorrect\n";
-    }
-    
-    // Deep OTM option
-    double otm_price = BlackScholes::call_price(CP, 50.0, K, r, v, T);
-    std::cout << "Deep OTM price (S=50): " << otm_price << "\n";
-    if (otm_price < 1.0) {  // Should be small but positive
-        std::cout << "✓ Deep OTM price is reasonable\n";
-    } else {
-        std::cout << "✗ Deep OTM price seems incorrect\n";
-    }
-    
-    // Zero volatility case
-    double zero_vol_price = BlackScholes::call_price(CP, S, K, r, 0.0001, T);
-    double intrinsic = std::max(0.0, S - K * std::exp(-r * T));
-    std::cout << "Near-zero volatility price: " << zero_vol_price << "\n";
-    std::cout << "Intrinsic value: " << intrinsic << "\n";
-    if (std::abs(zero_vol_price - intrinsic) < 0.1) {
-        std::cout << "✓ Zero volatility case converges to intrinsic value\n";
-    } else {
-        std::cout << "✗ Zero volatility case failed\n";
-    }
-    
-    std::cout << "\nBlack-Scholes testing completed.\n";
-}
 
 
 void test_DO_scheme() {
@@ -2267,7 +2173,6 @@ void test_DO_scheme() {
 
         */
         
-        //test_parallel_tridiagonal2();
         //test_heston_call();
         //test_DO_m1_convergence();
         //test_all_convergence();
@@ -2277,6 +2182,7 @@ void test_DO_scheme() {
         * Tests where we shuffled the A2 direction to have independent diagonals
 
         */
+
         test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
         //test_shuffled_convergence();

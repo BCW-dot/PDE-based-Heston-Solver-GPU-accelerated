@@ -1,9 +1,13 @@
 // bs.hpp
+
 #pragma once
 #include <cmath>
 #include <iostream>
+#include <vector>
 
-//THIS IS WRONG; THE CALL PRICES ARE COMPUTED NOT CORRECTLY I STRONGLY BELIEF
+// Include Kokkos header
+#include <Kokkos_Core.hpp>
+
 class BlackScholes {
 private:
     // Constants for normal CDF approximation
@@ -186,3 +190,4 @@ public:
 };
 
 
+void test_black_scholes();

@@ -18,6 +18,7 @@
 #include "heston_calibration.hpp"
 
 #include "MC_hes.hpp"
+#include "bs.hpp"
 
 
 #include <iostream>
@@ -55,10 +56,15 @@ int main(int argc, char* argv[]) {
     //test_heston_calibration();
     //test_jacobian_computation();
 
-    //test a monte carlo pricer
+    /*
+    
+    Test helper code
+    
+    */
     //test_Monte_Carlo_Heston();
+    //test_black_scholes();
 
-    //test_kokkos_kernels();
+
     std::cout << "Tests have completed successfully." << std::endl;
     
 

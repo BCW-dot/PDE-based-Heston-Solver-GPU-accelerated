@@ -99,6 +99,7 @@ std::vector<double> HestonEuropeanCall::priceOptionStandard() {
 }
 
 // Heston model with reflection implementation (when Feller condition is violated)
+// Heston model with reflection implementation (when Feller condition is violated)
 std::vector<double> HestonEuropeanCall::priceOptionWithReflection() {
     std::clock_t start_time = clock();
     double sum_price = 0.0;
@@ -122,11 +123,15 @@ std::vector<double> HestonEuropeanCall::priceOptionWithReflection() {
             double dW_v = sqrt(dt) * Z_1;
             double dW_s = sqrt(dt) * (rho * Z_1 + sqrt(1 - rho * rho) * Z_2);
 
-            // Update volatility with reflection
-            double d_V = kappa * (theta - V) * dt + sigma * sqrt(V) * dW_v;
-            V += std::max(d_V, -d_V);
+            // Update volatility with proper treatment when Feller condition is violated
+            double drift = kappa * (theta - V) * dt;
+            double diffusion = sigma * sqrt(std::max(V, 0.0)) * dW_v;
+            double d_V = drift + diffusion;
             
-            // Update stock price with reflected volatility
+            // Apply absorption at zero instead of reflection
+            V = std::max(V + d_V, 0.0);
+            
+            // Update stock price
             double d_S = r * S * dt + S * sqrt(V) * dW_s;
             S += d_S;
         }
@@ -150,7 +155,6 @@ std::vector<double> HestonEuropeanCall::priceOptionWithReflection() {
     // Return price, confidence interval, and execution time
     return {mean_price, conf_interval, execution_time};
 }
-
 
 /*
 
