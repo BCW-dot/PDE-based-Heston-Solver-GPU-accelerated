@@ -2,82 +2,14 @@
 #define DO_SCHEME_HPP
 
 #include <Kokkos_Core.hpp>
-#include "vector_ops.hpp"
-#include "f_functions.hpp"
+
+
 #include "hes_mat_fac.hpp"
 #include "hes_A2_mat.hpp"
 #include "BoundaryConditions.hpp"
 
 #include <thread>     // For std::this_thread::sleep_for
 
-
-//basic DO scheme implemntation. Below is an optimized version
-/*
-template<class ViewType>
-void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
-              const int N,                     // Number of time steps
-              const ViewType& U_0,             // Initial condition
-              const double delta_t,            // Time step size
-              const double theta,              // Weight parameter
-              heston_A0Storage_gpu& A0,        // A0 matrix (removed const)
-              heston_A1Storage_gpu& A1,        // A1 matrix (removed const)
-              heston_A2Storage_gpu& A2,        // A2 matrix (removed const)
-              const BoundaryConditions& bounds,// Boundary conditions
-              const double r_f,                // Foreign interest rate
-              ViewType& U) {                   // Result vector
-    
-    // Copy initial condition to U
-    Kokkos::deep_copy(U, U_0);
-
-    // Temporary vectors for computations
-    ViewType Y_0("Y_0", m);
-    ViewType rhs_1("rhs_1", m);
-
-    ViewType Y_1("Y_1", m);
-    ViewType rhs_2("rhs_2", m);
-    
-    ViewType temp("temp", m);
-    ViewType exp_b1("exp_b1", m);
-    ViewType exp_b2("exp_b2", m);
-
-    // Get boundary vectors
-    auto b = bounds.get_b();
-    auto b1 = bounds.get_b1();
-    auto b2 = bounds.get_b2();
-
-    // Main time stepping loop
-    for (int n = 1; n <= N; n++) {
-        // Step 1: Y_0 = U + dt * F(n-1, U, A, b, r_f, dt)
-        FFunctions::F(n-1, U, A0, A1, A2, b, r_f, delta_t, temp);
-        VectorOps::axpy(U, delta_t, temp, Y_0); //U + delta_t * temp = Y0
-
-        // Step 2: Compute rhs_1 = Y_0 + theta*dt*(b1*exp(r_f*dt*n) - F_1(n-1, U, A1, b1, r_f, dt))
-        VectorOps::exp_scale(b1, r_f * delta_t, n, exp_b1);
-        FFunctions::F_1(n-1, U, A1, b1, r_f, delta_t, temp);
-        
-        VectorOps::scale(-1.0, temp, temp);  // -F_1
-        VectorOps::add(exp_b1, temp, temp);  // b1*exp(...) - F_1
-        VectorOps::scale(theta * delta_t, temp, temp);
-        VectorOps::add(Y_0, temp, rhs_1);
-
-        // Step 3: Solve (I - theta*dt*A1)Y_1 = rhs_1
-        //A1.solve_implicit(Y_1, rhs_1);
-        A1.solve_implicit_parallel_v(Y_1, rhs_1);
-
-        // Step 4: Compute rhs_2 = Y_1 + theta*dt*(b2*exp(r_f*dt*n) - F_2(n-1, U, A2, b2, r_f, dt))
-        VectorOps::exp_scale(b2, r_f * delta_t, n, exp_b2);
-        FFunctions::F_2(n-1, U, A2, b2, r_f, delta_t, temp);
-        
-        VectorOps::scale(-1.0, temp, temp);  // -F_2
-        VectorOps::add(exp_b2, temp, temp);  // b2*exp(...) - F_2
-        VectorOps::scale(theta * delta_t, temp, temp);
-        VectorOps::add(Y_1, temp, rhs_2);
-
-        // Step 5: Solve (I - theta*dt*A2)U = rhs_2
-        A2.solve_implicit(U, rhs_2);
-    }
-}
-*/
 
 template<class ViewType>
 void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)

@@ -9,6 +9,8 @@
 //implied vol
 #include "bs.hpp"
 
+#include <numeric>
+
 
 class ResultsExporter {
 public:
@@ -80,7 +82,7 @@ public:
         
         for (size_t i = 0; i < m1_sizes.size(); ++i) {
             int m1 = m1_sizes[i];
-            int m2 = fixed_m2;
+            int m2 = fixed_m2;// int(m1/2);
             
             // Record dimensions
             std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
@@ -88,6 +90,7 @@ public:
             // Setup grid and matrices
             int m = (m1 + 1) * (m2 + 1);
             Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
             
             // Initialize matrices
             heston_A0Storage_gpu A0(m1, m2);
@@ -170,6 +173,7 @@ public:
         for (size_t i = 0; i < m2_sizes.size(); ++i) {
             int m1 = fixed_m1;
             int m2 = m2_sizes[i];
+            //int m1 = m2 *2;
             
             // Record dimensions
             std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
@@ -177,6 +181,7 @@ public:
             // Setup grid and matrices
             int m = (m1 + 1) * (m2 + 1);
             Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
             
             // Initialize matrices
             heston_A0Storage_gpu A0(m1, m2);
@@ -265,6 +270,7 @@ public:
             int m = (m1 + 1) * (m2 + 1);
 
             Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
             
             heston_A0Storage_gpu A0(m1, m2);
             heston_A1Storage_gpu A1(m1, m2);
@@ -806,7 +812,7 @@ Shuffled DO scheme tests
 void test_heston_call_shuffled() {
     // Test parameters
     double K = 100.0;
-    double S_0 = 100.0;
+    double S_0 = 110.0;
 
     double V_0 = 0.04;
 
@@ -820,8 +826,8 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 200;
-    int m2 = 100;
+    int m1 = 75;
+    int m2 = 25;
 
     int m = (m1 + 1) * (m2 + 1);
     int N = 20;
@@ -898,7 +904,6 @@ void test_heston_call_shuffled() {
     ResultsExporter::exportToCSV("shuffled_heston_do_scheme", grid, U);
 }
 
-#include <numeric>
 void test_heston_call_shuffled_vary_m1() {
     // Fixed parameters
     double K = 100.0;
@@ -1085,7 +1090,7 @@ void test_shuffled_convergence() {
 void test_heston_american_call_shuffled() {
     // Test parameters
     double K = 100.0;
-    double S_0 = 100;
+    double S_0 = 110.0;
 
     double V_0 = 0.04;
 
@@ -1914,7 +1919,7 @@ void test_CS_convergence() {
     
     // Test m1 convergence
     std::vector<int> m1_sizes = {50, 75, 100, 150, 200, 250, 300};
-    int fixed_m2 = 50;
+    int fixed_m2 = 100;
     auto data_m1 = ConvergenceExporter::testFixedM2VaryM1(
         fixed_m2, m1_sizes, ref_price,
         K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta

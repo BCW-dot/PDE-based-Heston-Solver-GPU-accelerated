@@ -2428,7 +2428,7 @@ void compute_base_prices_multi_maturity(
 
 //This calibrates to european call options
 void test_calibration_european_multi_maturity(){
-    std::cout<< "Testing european" << std::endl;
+    std::cout<< "Testing european multi maturity" << std::endl;
     using Device = Kokkos::DefaultExecutionSpace;
     using timer = std::chrono::high_resolution_clock;
 
@@ -2459,23 +2459,44 @@ void test_calibration_european_multi_maturity(){
 
     // Setup maturity, strikes and market data
     //each maturity has the same amount of strikes and the same strike values
-    const int num_maturities = 3;
-    const int num_strikes = 50;
+    const int num_maturities = 12;
+    const int num_strikes = 25;
 
     const int total_calibration_size = num_maturities*num_strikes;
 
     std::vector<double> maturities(num_maturities);
     std::cout << "Maturities: ";
     for(int i = 0; i < num_maturities; ++i) {
-        maturities[i] = 0.5 + i * 0.2;
+        //maturities[i] = 0.1 + i * 0.1;
+        // Weekly maturities for first 12 weeks, then bi-weekly up to 3 months
+        /*
+        if (i < 12) {
+            maturities[i] = (i + 1) * (1.0/52.0); // Weekly (in years)
+        } else {
+            maturities[i] = (12 + (i-12)*2) * (1.0/52.0); // Bi-weekly
+        }
+        */
+        // Monthly maturities from 3 to 12 months
+        //maturities_medium[i] = 0.25 + i * (1.0/12.0); // Start at 3 months, monthly increments
+        // Quarterly for first 2 years, then semi-annually up to 5 years
+        if (i < 8) {
+            maturities[i] = 1.0 + i * 0.25; // Quarterly (in years) starting at 1 year
+        } else {
+            maturities[i] = 3.0 + (i-8) * 0.5; // Semi-annually after 3 years
+        }
         std::cout << maturities[i] << ", ";
     }
     std::cout << "" << std::endl;
 
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
+    double strike_width = 1.0; // Percentage of spot
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.8 + i * 1;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        //strikes[i] = S_0 * 0.7 + i * 0.5;
+
+        // Center around S_0 with finer spacing near the money
+        double percent_away = strike_width * (i - num_strikes/2);
+        strikes[i] = S_0 * (1.0 + percent_away/100.0);
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -2486,7 +2507,7 @@ void test_calibration_european_multi_maturity(){
 
     for(int m = 0; m < num_maturities; ++m) {
         double T_m = maturities[m];
-        int N_m = 20;//std::max(20, static_cast<int>(T_m * 20));  // Base steps on maturity
+        int N_m = std::max(20, static_cast<int>(T_m * 20));  // Base steps on maturity
         double dt_m = T_m / N_m;
         std::cout << "maturity " << T_m << " time points " << N_m << " dt " << dt_m << std::endl;
         
@@ -2511,8 +2532,11 @@ void test_calibration_european_multi_maturity(){
     }
     Kokkos::deep_copy(d_calibration_points, h_calibration_points);
 
+    //CONVERGENCE CHEKC CHANGED!!!!!!!!!!!!!!!!!
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    //look isnide claibration delta check
     const int max_iter = 15;
-    const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
+    const double tol = 1.0;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
 
     std::cout << "Computing Jacobian for " << num_maturities << " maturities and " << num_strikes << " strikes\n";
@@ -2730,7 +2754,8 @@ void test_calibration_european_multi_maturity(){
         }
 
         // Check convergence
-        if(delta_norm < tol || (current_error < tol)) {
+        //maybe do two errir checks one for delta normn and the other for the toleranze
+        if(delta_norm < 0.3 * tol || (current_error < tol)) {
             converged = true;
             std::cout << "Converged!" << std::endl;
             std::cout << "Error Tolerance: " << tol << std::endl;
@@ -2810,7 +2835,8 @@ void test_calibration_european_multi_maturity(){
     std::cout << "v₀ = " << current_v0 << std::endl;
     std::cout << "final error = " << final_error << std::endl;
     std::cout << "total iterations = " << iteration_count << std::endl;
-    std::cout << "Total PDE solves: " << num_strikes * (1 + 5 + 1) * iteration_count << std::endl;
+    int total_pde_solves = total_calibration_size * (1 + 5 + 1) * iteration_count - total_calibration_size;
+    std::cout << "Total PDE solves: " << total_pde_solves << std::endl;
     
 
     auto t_end_second = timer::now();
@@ -2842,6 +2868,7 @@ void test_calibration_european_multi_maturity(){
         << "Time=" << total_time << " s, "
         << "FinalError=" << final_error << ", "
         << "IterationCount=" << iteration_count << ", "
+        << "TotalPdeSolves=" << total_pde_solves << ", "
         << "init_kappa=" << kappa << ", "
         << "init_eta=" << eta << ", "
         << "init_sigma=" << sigma << ", "
