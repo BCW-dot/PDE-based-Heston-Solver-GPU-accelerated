@@ -88,7 +88,7 @@ void test_device_a0_multiple_instances() {
                 GridViews grid_i = deviceGrids(instance);
                 
                 solver.build_matrix(grid_i, rho, sigma, team);
-                solver.multiply_parallel_s_and_v(x_i, result_i, team);
+                solver.multiply_parallel_v(x_i, result_i, team);
         });
         Kokkos::fence();
 

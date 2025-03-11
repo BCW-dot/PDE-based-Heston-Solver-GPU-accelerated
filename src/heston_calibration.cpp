@@ -3170,7 +3170,7 @@ void test_DEVICE_calibration_european(){
 void test_heston_calibration(){
   Kokkos::initialize();
   {
-    //test_calibration_european();
+    test_calibration_european();
     //test_calibration_american();
     //test_calibration_dividends();
     //test_calibration_american_dividends();
@@ -3187,7 +3187,7 @@ void test_heston_calibration(){
     Calibrates multiple maturities of strikes
     
     */
-    test_calibration_european_multi_maturity();
+    //test_calibration_european_multi_maturity();
   }
   Kokkos::finalize();
 }

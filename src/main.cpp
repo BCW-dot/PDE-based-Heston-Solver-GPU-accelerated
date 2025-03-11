@@ -32,7 +32,7 @@ int main(int argc, char* argv[]) {
     //test_grid();
 
     //test_hes_mat_fac();
-    test_heston_A2_mat();
+    //test_heston_A2_mat();
 
     //test_boundary_conditions();
 
@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
 
     */
     //test_device_class();
-    //test_heston_calibration();
+    test_heston_calibration();
     //test_jacobian_computation();
 
     /*

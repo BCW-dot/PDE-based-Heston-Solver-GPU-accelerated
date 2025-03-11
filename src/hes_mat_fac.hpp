@@ -52,10 +52,12 @@ inline void heston_A0Storage_gpu::multiply(const Kokkos::View<double*>& x,
     auto x_ = x;
 
     // Zero out result vector in parallel before computation
+    
     Kokkos::parallel_for("A0_zero_result", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0, 1), KOKKOS_LAMBDA(const int i) {
         result(i) = 0.0;
     });
     Kokkos::fence();
+    
 
     // Parallelize over variance direction j
     Kokkos::parallel_for("A0_multiply_parallel_v", m2_-1, KOKKOS_LAMBDA(const int j) {
@@ -92,11 +94,12 @@ inline void heston_A0Storage_gpu::multiply_parallel_s_and_v(const Kokkos::View<d
     auto values_ = values;
     auto x_ = x;
     
-    //Kokkos::deep_copy(result, 0.0);
+    
     Kokkos::parallel_for("A0_zero_result", total_size, KOKKOS_LAMBDA(const int i) {
         result(i) = 0.0;
     });
     Kokkos::fence();
+    
 
     Kokkos::parallel_for("A0_multiply_parallel", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {m2_ - 1, m1_ - 1}), KOKKOS_LAMBDA(const int j, const int i) {
         int row_offset = (j + 1) * (m1_ + 1);

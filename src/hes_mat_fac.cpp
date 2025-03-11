@@ -897,7 +897,7 @@ void test_A1_implicit_performance() {
             
             times_par_sv[iter] = std::chrono::duration<double>(t_end - t_start).count();
         }
-        
+
         // Calculate statistics
         auto calculate_stats = [](const std::vector<double>& times) {
             double sum = std::accumulate(times.begin(), times.end(), 0.0);
@@ -951,8 +951,6 @@ void test_A1_implicit_performance() {
         std::cout << "Full Parallel vs Variance-Only: " << std::fixed << std::setprecision(2) << speedup_sv_v << "x\n";
     }
 }
-
-
 
 
 void test_hes_mat_fac() {

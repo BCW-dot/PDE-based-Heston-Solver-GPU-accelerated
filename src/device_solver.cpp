@@ -291,7 +291,7 @@ void test_DEVICE_parallel_DO_scheme() {
 
             for(int n = 1; n <= N; n++) {
                 // Step 1: Y0 computation
-                A0_solvers(instance).multiply_parallel_s_and_v(U_i, A0_result_i, team);
+                A0_solvers(instance).multiply_parallel_v(U_i, A0_result_i, team);
                 A1_solvers(instance).multiply_parallel_v(U_i, A1_result_i, team);
                 
                 device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
@@ -2010,9 +2010,6 @@ void test_pertubation_computation() {
     
     
 }
-
-
-
 
 
 

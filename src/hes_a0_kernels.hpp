@@ -56,43 +56,41 @@ struct Device_A0_heston {
 
     template<class XView, class ResultView>
     KOKKOS_FUNCTION
-    void multiply_parallel_s_and_v(const XView& x, const ResultView& result,
+    void multiply_parallel_v(const XView& x, const ResultView& result,
                                  const Kokkos::TeamPolicy<>::member_type& team){
     
-    //Zero out result vector, since A0 matrix has a "complex" zero strucutre appearing in the values we can not account for those
-    //inside the function itself. We have to zero out first
-    const int total_size = (m1+1)*(m2+1);
-    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
-        [&](const int i) {
-            result(i) = 0.0;
-    });
-    team.team_barrier();
-    
-    //Kokkos::deep_copy(result,0.0);
+        //Zero out result vector, since A0 matrix has a "complex" zero strucutre appearing in the values we can not account for those
+        //inside the function itself. We have to zero out first
+        const int total_size = (m1+1)*(m2+1);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
+            [&](const int i) {
+                result(i) = 0.0;
+        });
+        team.team_barrier();
+        
+        // Main computation - only fill in non-zero blocks
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2-1),
+            [&](const int j) {
+                for(int i = 0; i < m1-1; i++) {
+                    const int row_offset = (j + 1) * (m1 + 1) + (i + 1);
+                    double sum = 0.0;
 
-    // Main computation - only fill in non-zero blocks
-    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, m2-1),
-        [&](const int j) {
-            for(int i = 0; i < m1-1; i++) {
-                const int row_offset = (j + 1) * (m1 + 1) + (i + 1);
-                double sum = 0.0;
-
-                // Sum up contributions from 9 entries
-                for(int l = -1; l <= 1; l++) {
-                    for(int k = -1; k <= 1; k++) {
-                        const int val_idx = i * 9 + (l + 1) * 3 + (k + 1);
-                        const int col_idx = (i + 1 + k) + (j + 1 + l) * (m1 + 1);
-                        
-                        if(col_idx >= 0 && col_idx < total_size) {
-                            sum += values(j, val_idx) * x(col_idx);
+                    // Sum up contributions from 9 entries
+                    for(int l = -1; l <= 1; l++) {
+                        for(int k = -1; k <= 1; k++) {
+                            const int val_idx = i * 9 + (l + 1) * 3 + (k + 1);
+                            const int col_idx = (i + 1 + k) + (j + 1 + l) * (m1 + 1);
+                            
+                            if(col_idx >= 0 && col_idx < total_size) {
+                                sum += values(j, val_idx) * x(col_idx);
+                            }
                         }
                     }
+                    result(row_offset) = sum;
                 }
-                result(row_offset) = sum;
-            }
-        });
-    
-    team.team_barrier();
+            });
+        
+        team.team_barrier();
     }
 };
 

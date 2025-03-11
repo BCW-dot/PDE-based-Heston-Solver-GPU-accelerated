@@ -7,8 +7,6 @@
 #include "hes_A2_mat.hpp"
 #include "BoundaryConditions.hpp"
 
-#include <thread>     // For std::this_thread::sleep_for
-
 /*
 
 All of these methods are doing implicit host device transfers. This is because the lambda function (which is perfoming the actual explcict
@@ -19,16 +17,16 @@ This will be fixed in the device_solver file where we do not have any host devic
 
 template<class ViewType>
 void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
-                        const int N,                     // Number of time steps
-                        const ViewType& U_0,             // Initial condition
-                        const double delta_t,            // Time step size
-                        const double theta,              // Weight parameter
-                        heston_A0Storage_gpu& A0,        // A0 matrix
-                        heston_A1Storage_gpu& A1,        // A1 matrix 
-                        heston_A2Storage_gpu& A2,        // A2 matrix
-                        const BoundaryConditions& bounds,// Boundary conditions
-                        const double r_f,                // Foreign interest rate
-                        ViewType& U) {                   // Result vector
+            const int N,                     // Number of time steps
+            const ViewType& U_0,             // Initial condition
+            const double delta_t,            // Time step size
+            const double theta,              // Weight parameter
+            heston_A0Storage_gpu& A0,        // A0 matrix
+            heston_A1Storage_gpu& A1,        // A1 matrix 
+            heston_A2Storage_gpu& A2,        // A2 matrix
+            const BoundaryConditions& bounds,// Boundary conditions
+            const double r_f,                // Foreign interest rate
+            ViewType& U) {                   // Result vector
     
     // Initialize result with initial condition
     Kokkos::deep_copy(U, U_0);
@@ -58,11 +56,11 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
         //A0.multiply(U, A0_result);
         A0.multiply_parallel_s_and_v(U, A0_result);
 
-        A1.multiply(U, A1_result); //parallel in v
-        //A1.multiply_parallel_s_and_v(U, A1_result);
+        //A1.multiply(U, A1_result); //parallel in v
+        A1.multiply_parallel_s_and_v(U, A1_result);
 
-        A2.multiply(U, A2_result);
-        //A2.multiply_parallel_s_and_v(U, A2_result);
+        //A2.multiply(U, A2_result);
+        A2.multiply_parallel_s_and_v(U, A2_result);
         
         Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor = std::exp(r_f * delta_t * (n-1));
@@ -107,8 +105,8 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
 
 template<class ViewType>
 void DO_scheme_shuffle(const int m,                    
-              const int m1,                    // Added for shuffling
-              const int m2,                    // Added for shuffling
+              const int m1,                    
+              const int m2,                    
               const int N,                     
               const ViewType& U_0,             
               const double delta_t,            
@@ -148,8 +146,8 @@ void DO_scheme_shuffle(const int m,
     // Main time stepping loop
     for (int n = 1; n <= N; n++) {
         //compute Y0
-        A0.multiply(U, A0_result);
-        //A0.multiply_parallel_s_and_v(U, A0_result);
+        //A0.multiply(U, A0_result);
+        A0.multiply_parallel_s_and_v(U, A0_result);
         A1.multiply_parallel_s_and_v(U, A1_result);
         
         // Add shuffled A2 multiplication (but don't use result yet)
@@ -347,7 +345,7 @@ void DO_scheme_dividend_shuffled(
     const std::vector<double>& dividend_dates,    // Host vector
     const std::vector<double>& dividend_amounts,  // Host vector 
     const std::vector<double>& dividend_percentages, // Host vector
-    ViewType& device_Vec_s, //device side stock values
+    ViewType& device_Vec_s, //device side stock values for dividend adjustments
     heston_A0Storage_gpu& A0,
     heston_A1Storage_gpu& A1,
     heston_A2_shuffled& A2_shuf,
@@ -522,7 +520,7 @@ void DO_scheme_american_dividend_shuffled(
     const std::vector<double>& dividend_dates,    // Host vector
     const std::vector<double>& dividend_amounts,  // Host vector 
     const std::vector<double>& dividend_percentages, // Host vector    
-    ViewType& device_Vec_s, //device side stock values          
+    ViewType& device_Vec_s, //device side stock values for dividend adjustments      
     heston_A0Storage_gpu& A0,        
     heston_A1Storage_gpu& A1,                
     heston_A2_shuffled& A2_shuf,     
