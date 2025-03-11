@@ -26,7 +26,7 @@ public:
     void build_matrix(const Grid& grid, double rho, double sigma);
 
     // Method to multiply - runs on device - is called from host
-    void multiply_seq(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) const;
+    void multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) const;
 
     // Method to multiply, parallised over variance and stock - runs on device - is called from host
     void multiply_parallel_s_and_v(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) const;
@@ -42,8 +42,8 @@ public:
     const Kokkos::View<double**>& get_values() const { return values; }
 };
 
-//one thread on the GPU perfoms the computation
-inline void heston_A0Storage_gpu::multiply_seq(const Kokkos::View<double*>& x, 
+//parallisation over the variance direction
+inline void heston_A0Storage_gpu::multiply(const Kokkos::View<double*>& x, 
                                              Kokkos::View<double*>& result) const {
     int total_size = x.size();
     int m1_ = m1;
@@ -51,48 +51,35 @@ inline void heston_A0Storage_gpu::multiply_seq(const Kokkos::View<double*>& x,
     auto values_ = values;
     auto x_ = x;
 
-    //Debugging D0 scheme
-    //Kokkos::deep_copy(result, 0.0);
-    //auto result_ = result;
-
     // Zero out result vector in parallel before computation
     Kokkos::parallel_for("A0_zero_result", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0, 1), KOKKOS_LAMBDA(const int i) {
         result(i) = 0.0;
     });
     Kokkos::fence();
 
-
-    // Run on a single thread
-    Kokkos::parallel_for("A0_multiply_seq", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0, 1), 
-                            KOKKOS_LAMBDA(const int&) {
-        //first zero block
+    // Parallelize over variance direction j
+    Kokkos::parallel_for("A0_multiply_parallel_v", m2_-1, KOKKOS_LAMBDA(const int j) {
+        int row_offset = (j + 1) * (m1_ + 1);
         
-        for(int k = 0; k<1+m1_+1; k++){
-            result(k) = 0.0;
-        }
-        
-
-        for (int j = 0; j < m2_ - 1; ++j) {
-            int row_offset = (j + 1) * (m1_ + 1);
-            for (int i = 0; i < m1_ - 1; ++i) {
-                double sum = 0.0;
-                for (int l = -1; l <= 1; ++l) {
-                    for (int k = -1; k <= 1; ++k) {
-                        int val_idx = i * 9 + (l + 1) * 3 + (k + 1);
-                        int col_idx = (i + 1 + k) + (j + 1 + l) * (m1_ + 1);
-                        if (col_idx >= 0 && col_idx < total_size) {
-                            sum += values_(j, val_idx) * x_(col_idx);
-                        }
+        // Process all stock points for this variance level
+        for (int i = 0; i < m1_ - 1; ++i) {
+            double sum = 0.0;
+            
+            // Process the 3x3 stencil around point (i,j)
+            for (int l = -1; l <= 1; ++l) {
+                for (int k = -1; k <= 1; ++k) {
+                    int val_idx = i * 9 + (l + 1) * 3 + (k + 1);
+                    int col_idx = (i + 1 + k) + (j + 1 + l) * (m1_ + 1);
+                    
+                    if (col_idx >= 0 && col_idx < total_size) {
+                        sum += values_(j, val_idx) * x_(col_idx);
                     }
                 }
-                result(row_offset + i + 1) = sum;
             }
+            
+            // Store result for this stock point
+            result(row_offset + i + 1) = sum;
         }
-        
-        for(int k=m1_ + (m2_-1)*(m1_+1); k< (m1_+1)*(m2_+1); k++){
-            result(k) = 0;
-        }
-        
     });
     Kokkos::fence();
 }
@@ -127,17 +114,6 @@ inline void heston_A0Storage_gpu::multiply_parallel_s_and_v(const Kokkos::View<d
     });
     Kokkos::fence();
 
-    // Zero the tail region
-    {
-        int start_tail = m1_ + (m2_ - 1)*(m1_ + 1);
-        int end_tail = (m1_ + 1)*(m2_ + 1);
-        Kokkos::parallel_for("A0_zero_tail", Kokkos::RangePolicy<>(start_tail, end_tail), 
-            KOKKOS_LAMBDA(const int i) {
-                result(i) = 0.0;
-            }
-        );
-        Kokkos::fence();
-    }
 }
 
 

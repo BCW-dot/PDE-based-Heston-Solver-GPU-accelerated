@@ -30,7 +30,7 @@ void test_calibration_european(){
 
     // Market parameters
     const double S_0 = 100.0;
-    const double T = 2.0;
+    const double T = 1.0;
 
     const double r_d = 0.025;
     const double r_f = 0.0;
@@ -55,16 +55,16 @@ void test_calibration_european(){
     const double eps = 1e-6;  // Perturbation size for finite difference approximation in Jacobian matrix
 
     // Setup strikes and market data
-    const int num_strikes = 10;
+    const int num_strikes = 30;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.8 + i * 0.1;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.7 + i * 0.5;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
-    const int max_iter = 30;
+    const int max_iter = 15;
     const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
 
@@ -2162,6 +2162,8 @@ void test_calibration_american_dividends(){
 This calibrates a model to a number of maturites at a number of strikes
 Making the Jacobian of dim [num_maturity*num_strikes x 5] form the original [num_strikes x 5]
 
+
+Does not increase speefd when compared to the single maturity code 
 */
 // Market data organization
 struct CalibrationPoint {
@@ -2459,15 +2461,16 @@ void test_calibration_european_multi_maturity(){
 
     // Setup maturity, strikes and market data
     //each maturity has the same amount of strikes and the same strike values
-    const int num_maturities = 12;
-    const int num_strikes = 25;
+    const int num_maturities = 5;
+    const int num_strikes = 60;
 
     const int total_calibration_size = num_maturities*num_strikes;
 
     std::vector<double> maturities(num_maturities);
     std::cout << "Maturities: ";
     for(int i = 0; i < num_maturities; ++i) {
-        //maturities[i] = 0.1 + i * 0.1;
+        //maturities[i] = 0.8 + i * 0.1;
+
         // Weekly maturities for first 12 weeks, then bi-weekly up to 3 months
         /*
         if (i < 12) {
@@ -2476,14 +2479,20 @@ void test_calibration_european_multi_maturity(){
             maturities[i] = (12 + (i-12)*2) * (1.0/52.0); // Bi-weekly
         }
         */
+
         // Monthly maturities from 3 to 12 months
         //maturities_medium[i] = 0.25 + i * (1.0/12.0); // Start at 3 months, monthly increments
+
+
         // Quarterly for first 2 years, then semi-annually up to 5 years
+        
         if (i < 8) {
             maturities[i] = 1.0 + i * 0.25; // Quarterly (in years) starting at 1 year
         } else {
             maturities[i] = 3.0 + (i-8) * 0.5; // Semi-annually after 3 years
         }
+        
+
         std::cout << maturities[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -3166,7 +3175,18 @@ void test_heston_calibration(){
     //test_calibration_dividends();
     //test_calibration_american_dividends();
 
+    /*
+    
+    does not work yet adn will liekly not be implemented
+
+    */
     //test_DEVICE_calibration_european();
+
+    /*
+    
+    Calibrates multiple maturities of strikes
+    
+    */
     test_calibration_european_multi_maturity();
   }
   Kokkos::finalize();

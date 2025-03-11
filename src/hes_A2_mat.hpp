@@ -43,6 +43,9 @@ public:
     // Multiply function - kept inline for performance
     inline void multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result);
 
+    // Multiply parallel in v function - kept inline for performance
+    inline void multiply_parallel_v(const Kokkos::View<double*>& x, Kokkos::View<double*>& result);
+
     // Multiply function parallel in stock and variance - kept inline for performance
     inline void multiply_parallel_s_and_v(const Kokkos::View<double*>& x, Kokkos::View<double*>& result);
 
@@ -65,47 +68,7 @@ public:
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double*>& get_implicit_upper2_diag() const { return implicit_upper2_diag; }
 };
 
-/*
-inline void heston_A2Storage_gpu::multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
-    const int local_m1 = m1;
-    const int local_m2 = m2;
-
-    const auto local_main = main_diag;
-    const auto local_lower = lower_diag;
-    const auto local_upper = upper_diag;
-    const auto local_upper2 = upper2_diag;
-
-    const int spacing = local_m1 + 1;
-    
-    // First set result to zero
-    Kokkos::deep_copy(result, 0.0);
-    
-    Kokkos::parallel_for("multiply", Kokkos::RangePolicy<>(0, local_m2 - 1), KOKKOS_LAMBDA(const int j) {
-        if (j == 0) {
-            // First block (j=0)
-            for (int i = 0; i < spacing; i++) {
-                double temp = local_main(i) * x(i);
-                temp += local_upper(i) * x(i + spacing);
-                temp += local_upper2(i) * x(i + 2 * spacing);
-                result(i) = temp;
-            }
-        } 
-        else {
-            // Handle remaining blocks
-            int block_start = j * spacing;
-            for (int i = 0; i < spacing; i++) {
-                int idx = block_start + i;
-                double temp = local_lower(idx - spacing) * x(idx - spacing);
-                temp += local_main(idx) * x(idx);
-                temp += local_upper(idx) * x(idx + spacing);
-                result(idx) = temp;
-            }
-        }
-    });
-    Kokkos::fence();
-}
-*/
-
+//sequential single threaded
 inline void heston_A2Storage_gpu::multiply(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
     const int local_m1 = m1;
     const int local_m2 = m2;
@@ -145,6 +108,47 @@ inline void heston_A2Storage_gpu::multiply(const Kokkos::View<double*>& x, Kokko
     Kokkos::fence();
 }
 
+//parallel in v
+inline void heston_A2Storage_gpu::multiply_parallel_v(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
+    const int local_m1 = m1;
+    const int local_m2 = m2;
+
+    const auto local_main = main_diag;
+    const auto local_lower = lower_diag;
+    const auto local_upper = upper_diag;
+    const auto local_upper2 = upper2_diag;
+
+    const int spacing = local_m1 + 1;
+    
+    // First set result to zero
+    Kokkos::deep_copy(result, 0.0);
+    
+    Kokkos::parallel_for("multiply", Kokkos::RangePolicy<>(0, local_m2 - 1), KOKKOS_LAMBDA(const int j) {
+        if (j == 0) {
+            // First block (j=0)
+            for (int i = 0; i < spacing; i++) {
+                double temp = local_main(i) * x(i);
+                temp += local_upper(i) * x(i + spacing);
+                temp += local_upper2(i) * x(i + 2 * spacing);
+                result(i) = temp;
+            }
+        } 
+        else {
+            // Handle remaining blocks
+            int block_start = j * spacing;
+            for (int i = 0; i < spacing; i++) {
+                int idx = block_start + i;
+                double temp = local_lower(idx - spacing) * x(idx - spacing);
+                temp += local_main(idx) * x(idx);
+                temp += local_upper(idx) * x(idx + spacing);
+                result(idx) = temp;
+            }
+        }
+    });
+    Kokkos::fence();
+}
+
+//parallel in s and v
 inline void heston_A2Storage_gpu::multiply_parallel_s_and_v(const Kokkos::View<double*>& x, Kokkos::View<double*>& result) {
     const int local_m1 = m1;
     const int local_m2 = m2;

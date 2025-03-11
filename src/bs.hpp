@@ -114,6 +114,12 @@ public:
     }
     
 
+    /*
+    
+    For implied vol computation
+    
+    */
+
     // Calculate vega
     static double call_vega(int CP, double S, double K, double r, double v, double T) {
         double d = d_j(1, S, K, r, v, T);
@@ -153,8 +159,6 @@ public:
         return x;
     }
 
-
-        
 
     // Newton method for implied volatility with fallback to dichotomy
     static double reverse_BS(int CP, double S, double K, double r, double T, 

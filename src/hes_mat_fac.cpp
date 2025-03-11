@@ -3,6 +3,8 @@
 
 //for std::setprec() output debugging of flatten A1
 #include <iomanip>
+//for accumulate
+#include <numeric>
 
 /*
 
@@ -398,7 +400,6 @@ Here come the numerical tests for the A_i matrix classes. This is largely just a
 in the mat_fac file. We basically compare the residual between implicict and explicit steps
 
 */
-
 void test_A0_multiply() {
     using timer = std::chrono::high_resolution_clock;
     
@@ -435,7 +436,7 @@ void test_A0_multiply() {
     // Test multiply
     std::cout << "\nTesting multiply...\n";
     auto t_start = timer::now();
-    A0.multiply_seq(x, result);
+    A0.multiply(x, result);
     auto t_end = timer::now();
 
     std::cout << "Multiply time: "
@@ -560,6 +561,400 @@ void test_A1_multiply_and_implicit() {
 
 
 
+/*
+
+The next two tests are perfomance tests for the two different parallisation tequnices of the two matrices
+
+*/
+void test_A0_multiplication_performance() {
+    using timer = std::chrono::high_resolution_clock;
+    
+    // Define test dimensions - try different sizes to see scaling behavior
+    std::vector<std::pair<int, int>> test_dimensions = {
+        {50, 25},    // Small grid
+        {100, 50},   // Medium grid
+        {200, 100},  // Large grid
+        {300, 150}   // Very large grid
+    };
+    
+    // Number of iterations for each test to get reliable timings
+    const int NUM_ITERATIONS = 50;
+    
+    for (const auto& dims : test_dimensions) {
+        const int m1 = dims.first;
+        const int m2 = dims.second;
+        const int total_size = (m1 + 1) * (m2 + 1);
+        
+        std::cout << "\n=========================================\n";
+        std::cout << "Testing A0 multiply with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
+        std::cout << "Total grid size: " << total_size << " points\n";
+        
+        // Create grid
+        Grid grid = create_test_grid(m1, m2);
+        
+        // Initialize A0 matrix
+        heston_A0Storage_gpu A0(m1, m2);
+        double rho = -0.9;
+        double sigma = 0.3;
+        A0.build_matrix(grid, rho, sigma);
+        
+        // Create test vectors
+        Kokkos::View<double*> x("x", total_size);
+        Kokkos::View<double*> result_par_v("result_par_v", total_size);
+        Kokkos::View<double*> result_par_sv("result_par_sv", total_size);
+        
+        // Initialize x with values 1,2,3,...
+        Kokkos::parallel_for("init_x", total_size, KOKKOS_LAMBDA(const int idx) {
+            x(idx) = static_cast<double>(idx + 1);
+        });
+        Kokkos::fence();
+        
+        // Variables to track timing statistics
+        std::vector<double> times_par_v(NUM_ITERATIONS);
+        std::vector<double> times_par_sv(NUM_ITERATIONS);
+        
+        // Test 2: Variance-parallel multiply
+        std::cout << "Testing variance-parallel multiply (multiply_parallel_v)...\n";
+        for (int iter = 0; iter < NUM_ITERATIONS; iter++) {
+            Kokkos::deep_copy(result_par_v, 0.0);
+            
+            auto t_start = timer::now();
+            A0.multiply(x, result_par_v);
+            auto t_end = timer::now();
+            
+            times_par_v[iter] = std::chrono::duration<double>(t_end - t_start).count();
+        }
+        
+        // Test 3: Stock and Variance parallel multiply
+        std::cout << "Testing fully parallel multiply (multiply_parallel_s_and_v)...\n";
+        for (int iter = 0; iter < NUM_ITERATIONS; iter++) {
+            Kokkos::deep_copy(result_par_sv, 0.0);
+            
+            auto t_start = timer::now();
+            A0.multiply_parallel_s_and_v(x, result_par_sv);
+            auto t_end = timer::now();
+            
+            times_par_sv[iter] = std::chrono::duration<double>(t_end - t_start).count();
+        }
+        
+        // Calculate statistics
+        auto calculate_stats = [](const std::vector<double>& times) {
+            double sum = std::accumulate(times.begin(), times.end(), 0.0);
+            double mean = sum / times.size();
+            
+            std::vector<double> diff(times.size());
+            std::transform(times.begin(), times.end(), diff.begin(), 
+                           [mean](double x) { return x - mean; });
+            double sq_sum = std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0);
+            double stddev = std::sqrt(sq_sum / times.size());
+            
+            return std::make_pair(mean, stddev);
+        };
+        
+        auto [mean_par_v, stddev_par_v] = calculate_stats(times_par_v);
+        auto [mean_par_sv, stddev_par_sv] = calculate_stats(times_par_sv);
+        
+        // Verify correctness by comparing results
+        auto verify_results = [total_size](const Kokkos::View<double*>& result1, 
+                                          const Kokkos::View<double*>& result2,
+                                          const std::string& name1,
+                                          const std::string& name2) {
+            auto h_result1 = Kokkos::create_mirror_view(result1);
+            auto h_result2 = Kokkos::create_mirror_view(result2);
+            Kokkos::deep_copy(h_result1, result1);
+            Kokkos::deep_copy(h_result2, result2);
+            
+            double max_diff = 0.0;
+            for (int i = 0; i < total_size; i++) {
+                max_diff = std::max(max_diff, std::abs(h_result1(i) - h_result2(i)));
+            }
+            
+            std::cout << "Maximum difference between " << name1 << " and " << name2 
+                      << ": " << max_diff << std::endl;
+        };
+        
+    
+        verify_results(result_par_v, result_par_sv, "sequential", "fully-parallel");
+        
+        // Print performance results
+        std::cout << "\nPerformance Results (average over " << NUM_ITERATIONS << " runs):\n";
+        std::cout << "Variance-Only:   " << std::fixed << std::setprecision(6) << mean_par_v * 1000 
+                  << " ms (stddev: " << stddev_par_v * 1000 << " ms)\n";
+        std::cout << "Full Parallel:   " << std::fixed << std::setprecision(6) << mean_par_sv * 1000 
+                  << " ms (stddev: " << stddev_par_sv * 1000 << " ms)\n";
+        
+        // Calculate speedups
+        double speedup_sv_v = mean_par_v / mean_par_sv;
+        
+        std::cout << "\nSpeedups:\n";
+        std::cout << "Full Parallel vs Variance-Only: " << std::fixed << std::setprecision(2) << speedup_sv_v << "x\n";
+    }
+}
+
+void test_A1_multiplication_performance() {
+    using timer = std::chrono::high_resolution_clock;
+    
+    // Define test dimensions - try different sizes to see scaling behavior
+    std::vector<std::pair<int, int>> test_dimensions = {
+        {50, 25},    // Small grid
+        {100, 50},   // Medium grid
+        {200, 100},  // Large grid
+        {300, 150}   // Very large grid
+    };
+    
+    // Number of iterations for each test to get reliable timings
+    const int NUM_ITERATIONS = 50;
+    
+    for (const auto& dims : test_dimensions) {
+        const int m1 = dims.first;
+        const int m2 = dims.second;
+        const int total_size = (m1 + 1) * (m2 + 1);
+        
+        std::cout << "\n=========================================\n";
+        std::cout << "Testing A0 multiply with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
+        std::cout << "Total grid size: " << total_size << " points\n";
+        
+        // Create grid
+        Grid grid = create_test_grid(m1, m2);
+        
+        // Initialize A0 matrix
+        heston_A1Storage_gpu A1(m1, m2);
+        double rho = -0.9;
+        double sigma = 0.3;
+        double r_d = 0.025;
+        double r_f = 0.0;
+
+        A1.build_matrix(grid, rho, sigma, r_d, r_f);
+        
+        // Create test vectors
+        Kokkos::View<double*> x("x", total_size);
+        Kokkos::View<double*> result_par_v("result_par_v", total_size);
+        Kokkos::View<double*> result_par_sv("result_par_sv", total_size);
+        
+        // Initialize x with values 1,2,3,...
+        Kokkos::parallel_for("init_x", total_size, KOKKOS_LAMBDA(const int idx) {
+            x(idx) = static_cast<double>(idx + 1);
+        });
+        Kokkos::fence();
+        
+        // Variables to track timing statistics
+        std::vector<double> times_par_v(NUM_ITERATIONS);
+        std::vector<double> times_par_sv(NUM_ITERATIONS);
+        
+        // Test 2: Variance-parallel multiply
+        std::cout << "Testing variance-parallel multiply (multiply_parallel_v)...\n";
+        for (int iter = 0; iter < NUM_ITERATIONS; iter++) {
+            Kokkos::deep_copy(result_par_v, 0.0);
+            
+            auto t_start = timer::now();
+            A1.multiply(x, result_par_v);
+            auto t_end = timer::now();
+            
+            times_par_v[iter] = std::chrono::duration<double>(t_end - t_start).count();
+        }
+        
+        // Test 3: Stock and Variance parallel multiply
+        std::cout << "Testing fully parallel multiply (multiply_parallel_s_and_v)...\n";
+        for (int iter = 0; iter < NUM_ITERATIONS; iter++) {
+            Kokkos::deep_copy(result_par_sv, 0.0);
+            
+            auto t_start = timer::now();
+            A1.multiply_parallel_s_and_v(x, result_par_sv);
+            auto t_end = timer::now();
+            
+            times_par_sv[iter] = std::chrono::duration<double>(t_end - t_start).count();
+        }
+        
+        // Calculate statistics
+        auto calculate_stats = [](const std::vector<double>& times) {
+            double sum = std::accumulate(times.begin(), times.end(), 0.0);
+            double mean = sum / times.size();
+            
+            std::vector<double> diff(times.size());
+            std::transform(times.begin(), times.end(), diff.begin(), 
+                           [mean](double x) { return x - mean; });
+            double sq_sum = std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0);
+            double stddev = std::sqrt(sq_sum / times.size());
+            
+            return std::make_pair(mean, stddev);
+        };
+        
+        auto [mean_par_v, stddev_par_v] = calculate_stats(times_par_v);
+        auto [mean_par_sv, stddev_par_sv] = calculate_stats(times_par_sv);
+        
+        // Verify correctness by comparing results
+        auto verify_results = [total_size](const Kokkos::View<double*>& result1, 
+                                          const Kokkos::View<double*>& result2,
+                                          const std::string& name1,
+                                          const std::string& name2) {
+            auto h_result1 = Kokkos::create_mirror_view(result1);
+            auto h_result2 = Kokkos::create_mirror_view(result2);
+            Kokkos::deep_copy(h_result1, result1);
+            Kokkos::deep_copy(h_result2, result2);
+            
+            double max_diff = 0.0;
+            for (int i = 0; i < total_size; i++) {
+                max_diff = std::max(max_diff, std::abs(h_result1(i) - h_result2(i)));
+            }
+            
+            std::cout << "Maximum difference between " << name1 << " and " << name2 
+                      << ": " << max_diff << std::endl;
+        };
+        
+    
+        verify_results(result_par_v, result_par_sv, "sequential", "fully-parallel");
+        
+        // Print performance results
+        std::cout << "\nPerformance Results (average over " << NUM_ITERATIONS << " runs):\n";
+        std::cout << "Variance-Only:   " << std::fixed << std::setprecision(6) << mean_par_v * 1000 
+                  << " ms (stddev: " << stddev_par_v * 1000 << " ms)\n";
+        std::cout << "Full Parallel:   " << std::fixed << std::setprecision(6) << mean_par_sv * 1000 
+                  << " ms (stddev: " << stddev_par_sv * 1000 << " ms)\n";
+        
+        // Calculate speedups
+        double speedup_sv_v = mean_par_v / mean_par_sv;
+        
+        std::cout << "\nSpeedups:\n";
+        std::cout << "Full Parallel vs Variance-Only: " << std::fixed << std::setprecision(2) << speedup_sv_v << "x\n";
+    }
+}
+
+void test_A1_implicit_performance() {
+    using timer = std::chrono::high_resolution_clock;
+    
+    // Define test dimensions - try different sizes to see scaling behavior
+    std::vector<std::pair<int, int>> test_dimensions = {
+        {50, 25},    // Small grid
+        {100, 50},   // Medium grid
+        {200, 100},  // Large grid
+        {300, 150}   // Very large grid
+    };
+    
+    // Number of iterations for each test to get reliable timings
+    const int NUM_ITERATIONS = 50;
+    
+    for (const auto& dims : test_dimensions) {
+        const int m1 = dims.first;
+        const int m2 = dims.second;
+        const int total_size = (m1 + 1) * (m2 + 1);
+        
+        std::cout << "\n=========================================\n";
+        std::cout << "Testing A0 multiply with dimensions m1=" << m1 << ", m2=" << m2 << "\n";
+        std::cout << "Total grid size: " << total_size << " points\n";
+        
+        // Create grid
+        Grid grid = create_test_grid(m1, m2);
+        
+        // Initialize A0 matrix
+        heston_A1Storage_gpu A1(m1, m2);
+        double rho = -0.9;
+        double sigma = 0.3;
+        double r_d = 0.025;
+        double r_f = 0.0;
+
+        A1.build_matrix(grid, rho, sigma, r_d, r_f);
+
+        double theta = 0.8;
+        double delta_t = 1.0/20;
+
+        A1.build_implicit(theta, delta_t);
+        
+        // Create test vectors
+        Kokkos::View<double*> x("x", total_size);
+        Kokkos::View<double*> result_par_v("result_par_v", total_size);
+        Kokkos::View<double*> result_par_sv("result_par_sv", total_size);
+        
+        // Initialize x with values 1,2,3,...
+        Kokkos::parallel_for("init_x", total_size, KOKKOS_LAMBDA(const int idx) {
+            x(idx) = static_cast<double>(idx + 1);
+        });
+        Kokkos::fence();
+        
+        // Variables to track timing statistics
+        std::vector<double> times_par_v(NUM_ITERATIONS);
+        std::vector<double> times_par_sv(NUM_ITERATIONS);
+        
+        // Test 1: sequential implcicit
+        std::cout << "Testing variance-parallel multiply (multiply_parallel_v)...\n";
+        for (int iter = 0; iter < NUM_ITERATIONS; iter++) {
+            Kokkos::deep_copy(result_par_v, 0.0);
+            
+            auto t_start = timer::now();
+            A1.solve_implicit(result_par_v, x);
+            auto t_end = timer::now();
+            
+            times_par_v[iter] = std::chrono::duration<double>(t_end - t_start).count();
+        }
+        
+        // Test 3: Stock and Variance parallel multiply
+        std::cout << "test parallel v implicit \n";
+        for (int iter = 0; iter < NUM_ITERATIONS; iter++) {
+            Kokkos::deep_copy(result_par_sv, 0.0);
+            
+            auto t_start = timer::now();
+            A1.solve_implicit_parallel_v(result_par_sv, x);
+            auto t_end = timer::now();
+            
+            times_par_sv[iter] = std::chrono::duration<double>(t_end - t_start).count();
+        }
+        
+        // Calculate statistics
+        auto calculate_stats = [](const std::vector<double>& times) {
+            double sum = std::accumulate(times.begin(), times.end(), 0.0);
+            double mean = sum / times.size();
+            
+            std::vector<double> diff(times.size());
+            std::transform(times.begin(), times.end(), diff.begin(), 
+                           [mean](double x) { return x - mean; });
+            double sq_sum = std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0);
+            double stddev = std::sqrt(sq_sum / times.size());
+            
+            return std::make_pair(mean, stddev);
+        };
+        
+        auto [mean_par_v, stddev_par_v] = calculate_stats(times_par_v);
+        auto [mean_par_sv, stddev_par_sv] = calculate_stats(times_par_sv);
+        
+        // Verify correctness by comparing results
+        auto verify_results = [total_size](const Kokkos::View<double*>& result1, 
+                                          const Kokkos::View<double*>& result2,
+                                          const std::string& name1,
+                                          const std::string& name2) {
+            auto h_result1 = Kokkos::create_mirror_view(result1);
+            auto h_result2 = Kokkos::create_mirror_view(result2);
+            Kokkos::deep_copy(h_result1, result1);
+            Kokkos::deep_copy(h_result2, result2);
+            
+            double max_diff = 0.0;
+            for (int i = 0; i < total_size; i++) {
+                max_diff = std::max(max_diff, std::abs(h_result1(i) - h_result2(i)));
+            }
+            
+            std::cout << "Maximum difference between " << name1 << " and " << name2 
+                      << ": " << max_diff << std::endl;
+        };
+        
+    
+        verify_results(result_par_v, result_par_sv, "sequential", "fully-parallel");
+        
+        // Print performance results
+        std::cout << "\nPerformance Results (average over " << NUM_ITERATIONS << " runs):\n";
+        std::cout << "Variance-Only:   " << std::fixed << std::setprecision(6) << mean_par_v * 1000 
+                  << " ms (stddev: " << stddev_par_v * 1000 << " ms)\n";
+        std::cout << "Full Parallel:   " << std::fixed << std::setprecision(6) << mean_par_sv * 1000 
+                  << " ms (stddev: " << stddev_par_sv * 1000 << " ms)\n";
+        
+        // Calculate speedups
+        double speedup_sv_v = mean_par_v / mean_par_sv;
+        
+        std::cout << "\nSpeedups:\n";
+        std::cout << "Full Parallel vs Variance-Only: " << std::fixed << std::setprecision(2) << speedup_sv_v << "x\n";
+    }
+}
+
+
+
+
 void test_hes_mat_fac() {
     // Initialize Kokkos
     Kokkos::initialize();
@@ -572,8 +967,12 @@ void test_hes_mat_fac() {
             //test_A1_structure();
             
             //test_A0_multiply();
-            test_A1_multiply_and_implicit();
+            //test_A1_multiply_and_implicit();
 
+
+            //test_A0_multiplication_performance();
+            //test_A1_multiplication_performance();
+            test_A1_implicit_performance();
         }
         catch (std::exception& e) {
             std::cout << "Error: " << e.what() << std::endl;

@@ -55,7 +55,7 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
     // Main time stepping loop
     for (int n = 1; n <= N; n++) {
 
-        //A0.multiply_seq(U, A0_result);
+        //A0.multiply(U, A0_result);
         A0.multiply_parallel_s_and_v(U, A0_result);
 
         A1.multiply(U, A1_result); //parallel in v
@@ -147,10 +147,9 @@ void DO_scheme_shuffle(const int m,
 
     // Main time stepping loop
     for (int n = 1; n <= N; n++) {
-        ViewType A0_result("A0_result", m);
-
-        // Step 1: Let's first just verify we get same result with both A2s
-        A0.multiply_parallel_s_and_v(U, A0_result);
+        //compute Y0
+        A0.multiply(U, A0_result);
+        //A0.multiply_parallel_s_and_v(U, A0_result);
         A1.multiply_parallel_s_and_v(U, A1_result);
         
         // Add shuffled A2 multiplication (but don't use result yet)
@@ -246,8 +245,6 @@ void DO_scheme_american_shuffle(
 
     // Main time stepping loop
     for (int n = 1; n <= N; n++) {
-        //need to zero out A0
-        ViewType A0_result("A0_result", m);
 
         // Step 1: Matrix multiplications
         A0.multiply_parallel_s_and_v(U, A0_result);
@@ -460,8 +457,6 @@ void DO_scheme_dividend_shuffled(
             Kokkos::deep_copy(U, U_new);
         }
 
-        ViewType A0_result("A0_result", m);
-
         // Step 1: Let's first just verify we get same result with both A2s
         A0.multiply_parallel_s_and_v(U, A0_result);
         A1.multiply_parallel_s_and_v(U, A1_result);
@@ -640,9 +635,6 @@ void DO_scheme_american_dividend_shuffled(
             Kokkos::deep_copy(U, U_new);
         }
 
-        //need to zero out A0
-        ViewType A0_result("A0_result", m);
-
         // Step 1: Matrix multiplications
         A0.multiply_parallel_s_and_v(U, A0_result);
         A1.multiply_parallel_s_and_v(U, A1_result);
@@ -765,7 +757,6 @@ void CS_scheme(const int m,                    // Total size (m1+1)*(m2+1)
     // Main time stepping loop
     for (int n = 1; n <= N; n++) {
         // Step 1: Calculate Y_0
-        ViewType A0_result("A0_result", m);
         A0.multiply_parallel_s_and_v(U, A0_result);
         A1.multiply_parallel_s_and_v(U, A1_result);
         A2.multiply_parallel_s_and_v(U, A2_result);
@@ -880,7 +871,6 @@ void CS_scheme_shuffled(const int m,
 
     // Main time stepping loop
     for (int n = 1; n <= N; n++) {
-        ViewType A0_result("A0_result", m);
         // Step 1: Y_0 = U + dt * F(n-1, U, A, b)
         A0.multiply_parallel_s_and_v(U, A0_result);
         A1.multiply_parallel_s_and_v(U, A1_result);
@@ -1099,10 +1089,6 @@ void DO_scheme_dividend_shuffled_with_surface_tracking(
             // Update U with new values
             Kokkos::deep_copy(U, U_new);
         }
-        
-        
-
-        ViewType A0_result("A0_result", m);
 
         // Step 1: Let's first just verify we get same result with both A2s
         A0.multiply_parallel_s_and_v(U, A0_result);
@@ -1432,8 +1418,7 @@ void DO_scheme_american_dividend_shuffle_with_lambda_tracking(
             Kokkos::deep_copy(U, U_new);
         }
 
-        //need to zero out A0
-        ViewType A0_result("A0_result", m);
+        
 
         // Step 1: Matrix multiplications
         A0.multiply_parallel_s_and_v(U, A0_result);

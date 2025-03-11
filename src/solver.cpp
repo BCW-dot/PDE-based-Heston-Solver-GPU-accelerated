@@ -2162,8 +2162,6 @@ void test_CS_schuffled_implied_vol(){
     outfile.close();
 }
 
-
-
 void test_DO_scheme() {
     Kokkos::initialize();
         {
