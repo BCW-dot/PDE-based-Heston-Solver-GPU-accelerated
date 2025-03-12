@@ -67,10 +67,6 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
             Y_0(i) = U(i) + delta_t * (A0_result(i) + A1_result(i) + A2_result(i) + b(i) * exp_factor);
         });
 
-        // Step 2 & 3: Combined RHS computation and implicit solve for A1
-        A1.multiply_parallel_s_and_v(U, A1_result);  // Reuse A1_result
-        
-        
         Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
             double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
@@ -78,12 +74,8 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
             Y_0(i) = rhs;  // Reuse Y_0 to store RHS
         });
         
-        
         A1.solve_implicit_parallel_v(Y_1, Y_0);  // Y_0 contains RHS, result in Y_1
 
-        // Step 4 & 5: Combined RHS computation and implicit solve for A2
-        A2.multiply_parallel_s_and_v(U, A2_result);  // Reuse A2_result
-        
         
         Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -91,8 +83,7 @@ void DO_scheme(const int m,                    // Total size (m1+1)*(m2+1)
             double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_n - (A2_result(i) + b2(i) * exp_factor_nm1));
             Y_1(i) = rhs;  // Reuse Y_1 to store RHS
         });
-        
-
+    
         A2.solve_implicit(U, Y_1);  // Y_1 contains RHS, result in U
     }
 
@@ -146,7 +137,6 @@ void DO_scheme_shuffle(const int m,
     // Main time stepping loop
     for (int n = 1; n <= N; n++) {
         //compute Y0
-        //A0.multiply(U, A0_result);
         A0.multiply_parallel_s_and_v(U, A0_result);
         A1.multiply_parallel_s_and_v(U, A1_result);
         
@@ -160,9 +150,6 @@ void DO_scheme_shuffle(const int m,
             Y_0(i) = U(i) + delta_t * (A0_result(i) + A1_result(i) + A2_result_unshuf(i) + b(i) * exp_factor);
         });
 
-        // Rest of function exactly as original
-        A1.multiply_parallel_s_and_v(U, A1_result);
-        
         Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
             double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
@@ -172,10 +159,6 @@ void DO_scheme_shuffle(const int m,
         
         A1.solve_implicit_parallel_v(Y_1, Y_0);
 
-        shuffle_vector(U, U_shuffled, m1, m2);
-        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
-        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
-        
         Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
             double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
@@ -183,11 +166,9 @@ void DO_scheme_shuffle(const int m,
             Y_1(i) = rhs;  // Reuse Y_1 to store RHS
         });
 
-        // Shuffle input
+        // Shuffle 
         shuffle_vector(Y_1, Y_1_shuffled, m1, m2);
-        // Solve with shuffled A2
         A2_shuf.solve_implicit(U_next_shuffled, Y_1_shuffled);
-        // Unshuffle result back to U
         unshuffle_vector(U_next_shuffled, U, m1, m2);
     }
 
@@ -259,9 +240,6 @@ void DO_scheme_american_shuffle(
                         A2_result_unshuf(i) + b(i) * exp_factor + 
                         lambda_bar(i));  // Add lambda contribution
         });
-
-        // A1 step
-        A1.multiply_parallel_s_and_v(U, A1_result);
         
         Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -273,11 +251,6 @@ void DO_scheme_american_shuffle(
         
         A1.solve_implicit_parallel_v(Y_1, Y_0);
 
-        // A2 step
-        shuffle_vector(U, U_shuffled, m1, m2);
-        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
-        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
-        
         Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
             double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
@@ -468,9 +441,6 @@ void DO_scheme_dividend_shuffled(
             double exp_factor = std::exp(r_f * delta_t * (n-1));
             Y_0(i) = U(i) + delta_t * (A0_result(i) + A1_result(i) + A2_result_unshuf(i) + b(i) * exp_factor);
         });
-
-        // Rest of function exactly as original
-        A1.multiply_parallel_s_and_v(U, A1_result);
         
         Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -480,10 +450,6 @@ void DO_scheme_dividend_shuffled(
         });
         
         A1.solve_implicit_parallel_v(Y_1, Y_0);
-
-        shuffle_vector(U, U_shuffled, m1, m2);
-        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
-        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
         
         Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -649,9 +615,7 @@ void DO_scheme_american_dividend_shuffled(
                         lambda_bar(i));  // Add lambda contribution
         });
 
-        // A1 step
-        A1.multiply_parallel_s_and_v(U, A1_result);
-        
+    
         Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
             double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
@@ -661,11 +625,6 @@ void DO_scheme_american_dividend_shuffled(
         });
         
         A1.solve_implicit_parallel_v(Y_1, Y_0);
-
-        // A2 step
-        shuffle_vector(U, U_shuffled, m1, m2);
-        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
-        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
         
         Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
             double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -943,6 +902,174 @@ void CS_scheme_shuffled(const int m,
 
     auto t_end = timer::now();
     std::cout << "CS Shuffled time: "
+              << std::chrono::duration<double>(t_end - t_start).count()
+              << " seconds" << std::endl;
+}
+
+
+/*
+
+Modified Craig Snyde scheme is of second order for all theta
+
+*/
+//does not work yet 
+template<class ViewType>
+void MCS_scheme_shuffled(const int m,                    
+              const int m1,                    
+              const int m2,                    
+              const int N,                     
+              const ViewType& U_0,             
+              const double delta_t,            
+              const double theta,              
+              heston_A0Storage_gpu& A0,        
+              heston_A1Storage_gpu& A1,        
+              heston_A2_shuffled& A2_shuf,     
+              const BoundaryConditions& bounds,
+              const double r_f,                
+              ViewType& U) {                   
+    
+    // Initialize result with initial condition
+    Kokkos::deep_copy(U, U_0);
+
+    // Create persistent workspace vectors to avoid reallocations
+    ViewType Y_0("Y_0", m);
+    ViewType Y_1("Y_1", m);
+    ViewType Y_2("Y_2", m);
+    ViewType Y_0_hat("Y_0_hat", m);
+    ViewType Y_0_tilde("Y_0_tilde", m);
+    ViewType Y_1_tilde("Y_1_tilde", m);
+    
+    ViewType A0_result("A0_result", m);
+    ViewType A1_result("A1_result", m);
+    ViewType A0_Y2_result("A0_Y2_result", m);
+    ViewType full_result_prev("full_result_prev", m);
+    ViewType full_result_curr("full_result_curr", m);
+
+    ViewType Y_1_shuffled("Y_1_shuffled", m);
+    ViewType Y_1_tilde_shuffled("Y_1_tilde_shuffled", m);
+    ViewType Y_2_shuffled("Y_2_shuffled", m);
+    ViewType U_next_shuffled("U_next_shuffled", m);
+    
+    // Add shuffled workspace
+    ViewType U_shuffled("U_shuffled", m);
+    ViewType A2_result_shuffled("A2_result_shuffled", m);
+    ViewType A2_result_unshuf("A2_result_unshuf", m);  
+
+    // Get boundary vectors
+    auto b = bounds.get_b();
+    auto b0 = bounds.get_b0();
+    auto b1 = bounds.get_b1();
+    auto b2 = bounds.get_b2();
+
+    using timer = std::chrono::high_resolution_clock;
+    auto t_start = timer::now();
+
+    // Main time stepping loop
+    for (int n = 1; n <= N; n++) {
+        // Step 1: Compute Y_0 = U + dt * F(n-1, U, A, b)
+        A0.multiply_parallel_s_and_v(U, A0_result);
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);  
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        Kokkos::parallel_for("Y0_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor = std::exp(r_f * delta_t * (n-1));
+            // Store F(n-1, U, A, b) for later use in correction steps
+            full_result_prev(i) = A0_result(i) + A1_result(i) + A2_result_unshuf(i) + b(i) * exp_factor;
+            Y_0(i) = U(i) + delta_t * full_result_prev(i);
+        });
+
+        
+        Kokkos::parallel_for("A1_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_0(i) + theta * delta_t * (b1(i) * exp_factor_n - (A1_result(i) + b1(i) * exp_factor_nm1));
+            Y_0(i) = rhs;  // Reuse Y_0 to store RHS
+        });
+        
+        A1.solve_implicit_parallel_v(Y_1, Y_0);
+
+        Kokkos::parallel_for("A2_rhs_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_1(i) + theta * delta_t * (b2(i) * exp_factor_n - (A2_result_unshuf(i) + b2(i) * exp_factor_nm1));
+            Y_1(i) = rhs;  // Reuse Y_1 to store RHS
+        });
+
+        shuffle_vector(Y_1, Y_1_shuffled, m1, m2);
+        A2_shuf.solve_implicit(Y_2_shuffled, Y_1_shuffled);
+        unshuffle_vector(Y_2_shuffled, Y_2, m1, m2);
+
+        
+        // Step 4: Compute Y_0_hat with A0 correction
+        // Y_0_hat = Y_0 + theta*dt*(F_0(n,Y_2) - F_0(n-1,U))
+        A0.multiply_parallel_s_and_v(Y_2, A0_Y2_result);
+        
+        Kokkos::parallel_for("Y0_hat_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            
+            // F_0(n, Y_2)
+            double F0_n = A0_Y2_result(i) + b0(i) * exp_factor_n;
+            
+            // F_0(n-1, U)
+            double F0_nm1 = A0_result(i) + b0(i) * exp_factor_nm1;
+            
+            // Y_0_hat = Y_0 + theta*dt*(F_0(n,Y_2) - F_0(n-1,U))
+            Y_0_hat(i) = Y_0(i) + theta * delta_t * (F0_n - F0_nm1);
+        });
+
+        // Step 5: Compute Y_0_tilde with full operator correction
+        // Y_0_tilde = Y_0_hat + (0.5-theta)*dt*(F(n,Y_2) - F(n-1,U))
+        A1.multiply_parallel_s_and_v(Y_2, A1_result);
+        
+        shuffle_vector(Y_2, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        Kokkos::parallel_for("Y0_tilde_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            
+            // F(n, Y_2)
+            full_result_curr(i) = A0_Y2_result(i) + A1_result(i) + A2_result_unshuf(i) + b(i) * exp_factor_n;
+            
+            // Y_0_tilde = Y_0_hat + (0.5-theta)*dt*(F(n,Y_2) - F(n-1,U))
+            Y_0_tilde(i) = Y_0_hat(i) + (0.5 - theta) * delta_t * (full_result_curr(i) - full_result_prev(i));
+        });
+
+        // Step 6: Compute Y_1_tilde from Y_0_tilde
+        A1.multiply_parallel_s_and_v(U, A1_result);
+        
+        Kokkos::parallel_for("Y1_tilde_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_0_tilde(i) + theta * delta_t * (b1(i) * exp_factor_n - (A1_result(i) + b1(i) * exp_factor_nm1));
+            Y_0_tilde(i) = rhs;  // Reuse Y_0_tilde to store RHS
+        });
+        
+        A1.solve_implicit_parallel_v(Y_1_tilde, Y_0_tilde);
+
+        // Step 7: Compute final solution U from Y_1_tilde
+        shuffle_vector(U, U_shuffled, m1, m2);
+        A2_shuf.multiply(U_shuffled, A2_result_shuffled);
+        unshuffle_vector(A2_result_shuffled, A2_result_unshuf, m1, m2);
+        
+        Kokkos::parallel_for("final_U_computation", m, KOKKOS_LAMBDA(const int i) {
+            double exp_factor_n = std::exp(r_f * delta_t * n);
+            double exp_factor_nm1 = std::exp(r_f * delta_t * (n-1));
+            double rhs = Y_1_tilde(i) + theta * delta_t * (b2(i) * exp_factor_n - (A2_result_unshuf(i) + b2(i) * exp_factor_nm1));
+            Y_1_tilde(i) = rhs;  // Reuse Y_1_tilde to store RHS
+        });
+
+        shuffle_vector(Y_1_tilde, Y_1_tilde_shuffled, m1, m2);
+        A2_shuf.solve_implicit(U_next_shuffled, Y_1_tilde_shuffled);
+        unshuffle_vector(U_next_shuffled, U, m1, m2);
+    }
+
+    auto t_end = timer::now();
+    std::cout << "MCS time: "
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
 }

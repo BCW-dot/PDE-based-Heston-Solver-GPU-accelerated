@@ -46,11 +46,11 @@ void benchmark_DO_solver_performance(const std::string& output_filename = "kokko
     const double theta = 0.8;
     
     // Vary grid sizes and instance counts
-    std::vector<int> grid_sizes_m2 = {25, 50, 100, 150};//{25, 50, 100, 150};
-    std::vector<int> instance_counts = {1, 10, 20, 50, 100, 200, 300};//{1, 10, 20, 50, 100, 200, 500};
+    std::vector<int> grid_sizes_m2 = {25, 50, 100, 150};
+    std::vector<int> instance_counts = {5, 10, 20, 50, 100, 200, 300};
     
     // Number of runs for each configuration to average
-    const int NUM_RUNS = 15;
+    const int NUM_RUNS = 10;
     
     for (int m2 : grid_sizes_m2) {
         int m1 = 2*m2;

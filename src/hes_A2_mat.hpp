@@ -351,7 +351,7 @@ public:
     KOKKOS_INLINE_FUNCTION const Kokkos::View<double**>& get_implicit_upper2_diags() const { return implicit_upper2_diags; }
 };
 
-// Multiply implementation
+// Multiply implementation parallel in s
 inline void heston_A2_shuffled::multiply(const Kokkos::View<double*>& x, 
                                        Kokkos::View<double*>& result) {
     const int local_m1 = m1;
@@ -420,7 +420,7 @@ inline void heston_A2_shuffled::multiply(const Kokkos::View<double*>& x,
     Kokkos::fence();
 }
 
-
+//implicit impleemntation parallel in s
 inline void heston_A2_shuffled::solve_implicit(Kokkos::View<double*>& x, 
                                              const Kokkos::View<double*>& b) {
     const int local_m1 = m1;

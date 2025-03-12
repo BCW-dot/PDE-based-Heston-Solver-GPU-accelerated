@@ -8,6 +8,8 @@
 #include <iomanip>
 //implied vol
 #include "bs.hpp"
+//MC solution
+#include "MC_hes.hpp"
 
 #include <numeric>
 
@@ -695,8 +697,8 @@ void test_heston_call(){
     const double eta = 0.04;
     
     // Test parameters matching Python version
-    const int m1 = 100;
-    const int m2 = 75;
+    const int m1 = 50;
+    const int m2 = 25;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     const int m = (m1 + 1) * (m2 + 1);
@@ -879,6 +881,7 @@ void test_heston_call_shuffled() {
     int m2 = 25;
 
     int m = (m1 + 1) * (m2 + 1);
+
     int N = 20;
     double theta = 0.8;
 
@@ -942,10 +945,11 @@ void test_heston_call_shuffled() {
     double option_price = h_U[index_s + index_v*(m1+1)];
 
     // Compare with reference price (from Python/Monte Carlo)
-    const double reference_price = 8.8948693600540167;
-    std::cout << std::setprecision(16) << option_price << std::endl;
-    std::cout << "Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
-    std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+    const double reference_price = compute_MC_heston_call_price(S_0,V_0,K,r_d,r_f,rho,sigma,kappa,eta,T);//8.8948693600540167;
+    
+    std::cout << std::setprecision(16) << "Shuffled DO scheme price " << option_price << std::endl;
+    std::cout << "Shuffled DO scheme Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
+    std::cout << "Shuffled DO scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
 
     ResultsExporter::exportToCSV("shuffled_heston_do_scheme", grid, U);
 }
@@ -1145,7 +1149,7 @@ Exotic Option types
 void test_heston_american_call_shuffled() {
     // Test parameters
     double K = 100.0;
-    double S_0 = 110.0;
+    double S_0 = 100.0;
 
     double V_0 = 0.04;
 
@@ -1967,8 +1971,8 @@ void test_CS_convergence() {
     const double ref_price = 8.8948693600540167;
     
     // Test m1 convergence
-    std::vector<int> m1_sizes = {50, 75, 100, 150, 200, 250, 300};
-    int fixed_m2 = 100;
+    std::vector<int> m1_sizes = {50, 75, 100, 150};
+    int fixed_m2 = 50;
     auto data_m1 = ConvergenceExporter::testFixedM2VaryM1(
         fixed_m2, m1_sizes, ref_price,
         K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
@@ -1976,7 +1980,7 @@ void test_CS_convergence() {
     ConvergenceExporter::exportToCSV("cs_scheme_m1", data_m1);
     
     // Test m2 convergence
-    std::vector<int> m2_sizes = {20, 50, 70, 75, 85, 90, 100};
+    std::vector<int> m2_sizes = {20, 50, 70, 75};
     int fixed_m1 = 100;
     auto data_m2 = ConvergenceExporter::testFixedM1VaryM2(
         fixed_m1, m2_sizes, ref_price,
@@ -1997,10 +2001,13 @@ void test_CS_shuffled() {
     // Test parameters
     double K = 100.0;
     double S_0 = K;
+
     double V_0 = 0.04;
     double T = 1.0;
+
     double r_d = 0.025;
     double r_f = 0.0;
+
     double rho = -0.9;
     double sigma = 0.3;
     double kappa = 1.5;
@@ -2013,7 +2020,7 @@ void test_CS_shuffled() {
 
     const int m = (m1 + 1) * (m2 + 1);
 
-    const int N = 15;
+    const int N = 20;
     const double delta_t = T / N;
     const double theta = 0.8;
     std::cout << "Time Dimension: " << N << std::endl;
@@ -2069,7 +2076,7 @@ void test_CS_shuffled() {
 
     // Compare with reference price (from Python/Monte Carlo)
     const double reference_price = 8.8948693600540167;
-    std::cout << "CS_scheme price: " << std::setprecision(12) << option_price << std::endl;
+    std::cout << "CS_scheme price: " << std::setprecision(16) << option_price << std::endl;
     std::cout << "CS_scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
     //EXPECT_NEAR(option_price, reference_price, 0.1);
     ResultsExporter::exportToCSV("shuffled_heston_cs_scheme", grid, U);
@@ -2218,6 +2225,100 @@ void test_CS_schuffled_implied_vol(){
     outfile.close();
 }
 
+/*
+
+Modified Craig Snyde scheme test
+
+*/
+void test_MCS_shuffled() {
+    std::cout << "Testing MCS scheme \n";
+    // Test parameters
+    double K = 100.0;
+    double S_0 = K;
+
+    double V_0 = 0.04;
+    double T = 1.0;
+
+    double r_d = 0.025;
+    double r_f = 0.0;
+
+    double rho = -0.9;
+    double sigma = 0.3;
+    double kappa = 1.5;
+    double eta = 0.04;
+
+    const int m1 = 100;
+    const int m2 = 75;
+    std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
+
+    const int m = (m1 + 1) * (m2 + 1);
+
+    const int N = 50;
+    const double delta_t = T / N;
+    const double theta = 0.6;
+
+    std::cout << "Time Dimension: " << N << std::endl;
+    std::cout << "Theta: " << theta << std::endl;
+
+    // Create grid
+    Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+
+
+    // Initialize matrices
+    heston_A0Storage_gpu A0(m1, m2);
+    heston_A1Storage_gpu A1(m1, m2);
+    heston_A2_shuffled A2_shuf(m1, m2);
+    
+    // Build matrices
+    A0.build_matrix(grid, rho, sigma);
+    A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+    
+    // Build implicit systems
+    A1.build_implicit(theta, delta_t);
+    A2_shuf.build_implicit(theta, delta_t);
+
+   
+    // Create boundary conditions
+    BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+    bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
+
+    // Create initial condition and result vectors
+    Kokkos::View<double*> U_0("U_0", m);
+    Kokkos::View<double*> U("U", m);
+
+    // Initialize U_0 with payoff
+    auto h_U_0 = Kokkos::create_mirror_view(U_0);
+    for (int j = 0; j <= m2; j++) {
+        for (int i = 0; i <= m1; i++) {
+            h_U_0(i + j*(m1+1)) = std::max(grid.Vec_s[i] - K, 0.0);
+        }
+    }
+    Kokkos::deep_copy(U_0, h_U_0);
+
+    // Run CS scheme with shuffling
+    MCS_scheme_shuffled(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
+
+    // Print results if needed
+    auto h_U = Kokkos::create_mirror_view(U);
+    Kokkos::deep_copy(h_U, U);
+    
+    // Find option price at S_0 and V_0
+    int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+    int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+    double option_price = h_U[index_s + index_v*(m1+1)];
+
+    // Compare with reference price (from Python/Monte Carlo)
+    const double reference_price = 8.8948693600540167;
+    std::cout << "MCS_scheme price: " << std::setprecision(16) << option_price << std::endl;
+    std::cout << "MCS_scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
+    //EXPECT_NEAR(option_price, reference_price, 0.1);
+    ResultsExporter::exportToCSV("shuffled_heston_mcs_scheme", grid, U);
+}
+
+
+
+
 void test_DO_scheme() {
     Kokkos::initialize();
         {
@@ -2237,9 +2338,9 @@ void test_DO_scheme() {
 
         */
 
-        //test_heston_call_shuffled();
+        test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
-        test_shuffled_convergence();
+        //test_shuffled_convergence();
         //test_DO_shuffle_m2_convergence();
 
         //test_heston_american_call_shuffled();
@@ -2262,8 +2363,14 @@ void test_DO_scheme() {
         //test_CS_convergence();
         //test_CS_shuffled();
         //test_CS_schuffled_implied_vol();
+        
+        /*
+        
+        MCS Test
+        
+        */
+        //test_MCS_shuffled();
 
         } // All test objects destroyed here
     Kokkos::finalize();
-    //test_black_scholes();
 }
