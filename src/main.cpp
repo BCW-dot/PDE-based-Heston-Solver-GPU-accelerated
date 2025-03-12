@@ -16,6 +16,7 @@
 #include "device_solver.hpp"
 #include "jacobian_computation.hpp"
 #include "heston_calibration.hpp"
+#include "perfomance_test.hpp"
 
 #include "MC_hes.hpp"
 #include "bs.hpp"
@@ -53,8 +54,9 @@ int main(int argc, char* argv[]) {
 
     */
     //test_device_class();
-    test_heston_calibration();
+    //test_heston_calibration();
     //test_jacobian_computation();
+    test_perfomance_Tests();
 
     /*
     

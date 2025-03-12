@@ -280,9 +280,10 @@ void compute_jacobian(
                     break;
                 }
             }
+            //finding v index
             const int index_v = grid_i.find_v0_index(V_0);
 
-            // Now you can use these indices directly
+            // Now we can use these indices directly
             const double base_price = U_i(index_s + index_v*(m1+1));
             base_prices(instance) = base_price;
 
@@ -1334,6 +1335,7 @@ void compute_base_prices_american_dividends(
 }
 
 
+//This does not work and is under testing
 /*
 
 Purely device sideable calibration code
@@ -1675,36 +1677,6 @@ void test_jacobian_method(){
               << std::chrono::duration<double>(t_end - t_start).count()
               << " seconds" << std::endl;
 
-
-    //just a t
-    /*
-    Kokkos::View<double*> residuals("residuals", num_strikes);
-    Kokkos::View<double*> delta("delta", 5);
-
-    // Compute residuals on device
-    Kokkos::parallel_for("compute_residuals", num_strikes, 
-        KOKKOS_LAMBDA(const int i) {
-            residuals(i) = market_prices(i) - base_prices(i);
-    });
-    Kokkos::fence();
-
-    // Compute LM update with actual residuals
-    double lambda = 0.1;
-    compute_parameter_update_on_device(J, residuals, lambda, delta);
-
-    // Get delta on host
-    auto h_delta = Kokkos::create_mirror_view(delta);
-    Kokkos::deep_copy(h_delta, delta);
-
-    // Compute new parameters
-  
-    double new_kappa = kappa + h_delta(0);
-    double new_eta = eta + h_delta(1);
-    double new_sigma = sigma + h_delta(2);
-    double new_rho = rho + h_delta(3);
-    double new_v0 = V_0 + h_delta(4);
-    */
-
     // Copy base_prices to host for printing
     auto h_base_prices = Kokkos::create_mirror_view(base_prices);
     Kokkos::deep_copy(h_base_prices, base_prices);
@@ -1728,7 +1700,6 @@ void test_jacobian_method(){
     
     auto h_J = Kokkos::create_mirror_view(J);
     Kokkos::deep_copy(h_J, J);
-    
     
     // Column headers
     int precision = 12;

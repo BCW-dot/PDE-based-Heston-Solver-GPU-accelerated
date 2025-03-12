@@ -128,13 +128,30 @@ public:
             // Start timing
             auto start = std::chrono::high_resolution_clock::now();
 
-            // Run solver
-            DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-            //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-
             // Record time
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> duration = end - start;
+
+
+            int repeats = 20;
+            double totalTime = 0.0;
+
+            for (int i = 0; i < repeats; i++) {
+                auto start = std::chrono::high_resolution_clock::now();
+                
+                //run the solver
+                DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+                //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            
+                auto end = std::chrono::high_resolution_clock::now();
+                // Duration in seconds for this single call
+                std::chrono::duration<double> iterationDuration = (end - start);
+            
+                // Accumulate the time
+                totalTime += iterationDuration.count();
+            }
+            
+            double averageTime = totalTime / repeats;
 
             // Get price
             auto h_U = Kokkos::create_mirror_view(U);
@@ -145,7 +162,7 @@ public:
             double price = h_U[index_s + index_v*(m1+1)];
             
             // Store results
-            data.times.push_back(duration.count());
+            data.times.push_back(averageTime);
             data.prices.push_back(price);
             data.errors.push_back(std::abs(price - ref_price) / ref_price);
         }
@@ -216,16 +233,25 @@ public:
             }
             Kokkos::deep_copy(U_0, h_U_0);
 
-            // Run solver
-            // Start timing
-            auto start = std::chrono::high_resolution_clock::now();
+            int repeats = 20;
+            double totalTime = 0.0;
 
-            DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-            //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-
-            // Record time
-            auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration = end - start;
+            for (int i = 0; i < repeats; i++) {
+                auto start = std::chrono::high_resolution_clock::now();
+                
+                //run the solver
+                DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+                //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            
+                auto end = std::chrono::high_resolution_clock::now();
+                // Duration in seconds for this single call
+                std::chrono::duration<double> iterationDuration = (end - start);
+            
+                // Accumulate the time
+                totalTime += iterationDuration.count();
+            }
+            
+            double averageTime = totalTime / repeats;
 
             // Get price
             auto h_U = Kokkos::create_mirror_view(U);
@@ -237,7 +263,7 @@ public:
             
             
             // Store results
-            data.times.push_back(duration.count());
+            data.times.push_back(averageTime);
             data.prices.push_back(price);
             data.errors.push_back(std::abs(price - ref_price) / ref_price);
         }
@@ -300,13 +326,25 @@ public:
             }
             Kokkos::deep_copy(U_0, h_U_0);
 
-            auto start = std::chrono::high_resolution_clock::now();
+            int repeats = 20;
+            double totalTime = 0.0;
 
-            DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-            //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-
-            auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration = end - start;
+            for (int i = 0; i < repeats; i++) {
+                auto start = std::chrono::high_resolution_clock::now();
+                
+                //run the solver
+                DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+                //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+            
+                auto end = std::chrono::high_resolution_clock::now();
+                // Duration in seconds for this single call
+                std::chrono::duration<double> iterationDuration = (end - start);
+            
+                // Accumulate the time
+                totalTime += iterationDuration.count();
+            }
+            
+            double averageTime = totalTime / repeats;
 
             auto h_U = Kokkos::create_mirror_view(U);
             Kokkos::deep_copy(h_U, U);
@@ -315,7 +353,7 @@ public:
             int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
             double price = h_U[index_s + index_v*(m1+1)];
 
-            data.times.push_back(duration.count());
+            data.times.push_back(averageTime);
             data.prices.push_back(price);
             data.errors.push_back(std::abs(price - ref_price) / ref_price);
         }
@@ -382,7 +420,7 @@ public:
         }
         Kokkos::deep_copy(U_0, h_U_0);
 
-        int repeats = 5;
+        int repeats = 20;
         double totalTime = 0.0;
 
         for (int i = 0; i < repeats; i++) {
@@ -479,7 +517,7 @@ public:
             }
             Kokkos::deep_copy(U_0, h_U_0);
 
-            int repeats = 5;
+            int repeats = 20;
             double totalTime = 0.0;
 
             for (int i = 0; i < repeats; i++) {
@@ -550,7 +588,7 @@ public:
             A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
             const double delta_t = T / N;
-            const double theta = 0.5;
+            const double theta = 0.8;
 
             A1.build_implicit(theta, delta_t);
             //A2.build_implicit(theta, delta_t);
@@ -570,12 +608,24 @@ public:
             }
             Kokkos::deep_copy(U_0, h_U_0);
 
-            auto start = std::chrono::high_resolution_clock::now();
+            int repeats = 20;
+            double totalTime = 0.0;
+
+            for (int i = 0; i < repeats; i++) {
+                auto start = std::chrono::high_resolution_clock::now();
+                
+                // Call your function once
+                DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
             
-            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);//A2, A2_shuf, bounds, r_f, U);
+                auto end = std::chrono::high_resolution_clock::now();
+                // Duration in seconds for this single call
+                std::chrono::duration<double> iterationDuration = (end - start);
             
-            auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration = end - start;
+                // Accumulate the time
+                totalTime += iterationDuration.count();
+            }
+            
+            double averageTime = totalTime / repeats;
 
             auto h_U = Kokkos::create_mirror_view(U);
             Kokkos::deep_copy(h_U, U);
@@ -584,7 +634,7 @@ public:
             int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
             double price = h_U[index_s + index_v*(m1+1)];
 
-            data.times.push_back(duration.count());
+            data.times.push_back(averageTime);
             data.prices.push_back(price);
             data.errors.push_back(std::abs(price - ref_price) / ref_price);
         }
@@ -1085,6 +1135,12 @@ void test_shuffled_convergence() {
     ConvergenceExporter::exportTimeStepConvergenceToCSV("do_scheme_shuffled_N", data_N);
 }
 
+
+/*
+
+Exotic Option types
+
+*/
 // Function to compute American call price using DO scheme with shuffled A2
 void test_heston_american_call_shuffled() {
     // Test parameters
@@ -2181,9 +2237,9 @@ void test_DO_scheme() {
 
         */
 
-        test_heston_call_shuffled();
+        //test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
-        //test_shuffled_convergence();
+        test_shuffled_convergence();
         //test_DO_shuffle_m2_convergence();
 
         //test_heston_american_call_shuffled();
