@@ -473,11 +473,16 @@ public:
                                                  const double eta) {
         ConvergenceData data;
         data.m2_sizes = m2_sizes;
+
         data.m1_sizes.resize(m2_sizes.size(), fixed_m1);
         
         for (size_t i = 0; i < m2_sizes.size(); ++i) {
             int m1 = fixed_m1;
             int m2 = m2_sizes[i];
+
+            //data.m1_sizes.push_back(2*m2_sizes[i]);
+            //int m2 = m2_sizes[i];
+            //int m1 = 2*m2;
             
             std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
             
@@ -489,12 +494,10 @@ public:
             // Initialize matrices including shuffled A2
             heston_A0Storage_gpu A0(m1, m2);
             heston_A1Storage_gpu A1(m1, m2);
-            //heston_A2Storage_gpu A2(m1, m2);
             heston_A2_shuffled A2_shuf(m1, m2);
 
             A0.build_matrix(grid, rho, sigma);
             A1.build_matrix(grid, rho, sigma, r_d, r_f);
-            //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
             A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
 
             const int N = 20;
@@ -502,7 +505,6 @@ public:
             const double theta = 0.8;
 
             A1.build_implicit(theta, delta_t);
-            //A2.build_implicit(theta, delta_t);
             A2_shuf.build_implicit(theta, delta_t);
 
             BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
@@ -525,7 +527,7 @@ public:
             for (int i = 0; i < repeats; i++) {
                 auto start = std::chrono::high_resolution_clock::now();
                 
-                // Call your function once
+                // Call function once
                 DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
             
                 auto end = std::chrono::high_resolution_clock::now();
@@ -1083,7 +1085,7 @@ void test_DO_shuffle_m2_convergence() {
     const double ref_price = 8.8948693600540167;
     
     // Test parameters
-    std::vector<int> m2_sizes = {30, 50, 70, 75, 85, 90, 100};
+    std::vector<int> m2_sizes = {25, 50, 70, 81, 90, 101, 126, 150};
     int fixed_m1 = 100;
     auto data_m2 = ConvergenceExporter::testFixedM1VaryM2_shuffled(
         fixed_m1, m2_sizes, ref_price,
@@ -2317,8 +2319,6 @@ void test_MCS_shuffled() {
 }
 
 
-
-
 void test_DO_scheme() {
     Kokkos::initialize();
         {
@@ -2338,10 +2338,10 @@ void test_DO_scheme() {
 
         */
 
-        test_heston_call_shuffled();
+        //test_heston_call_shuffled();
         //test_heston_call_shuffled_vary_m1();
         //test_shuffled_convergence();
-        //test_DO_shuffle_m2_convergence();
+        test_DO_shuffle_m2_convergence();
 
         //test_heston_american_call_shuffled();
         //test_lambda_american_call();

@@ -37,7 +37,7 @@ int main(int argc, char* argv[]) {
 
     //test_boundary_conditions();
 
-    test_DO_scheme();
+    //test_DO_scheme();
 
     /*
     
@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
     Test for a device callable class
 
     */
-    //test_device_class();
+    test_device_class();
     //test_heston_calibration();
     //test_jacobian_computation();
     //test_perfomance_Tests();

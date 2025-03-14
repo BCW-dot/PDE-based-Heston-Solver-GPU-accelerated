@@ -777,7 +777,7 @@ void test_deviceCallable_Do_solver() {
 
     const double reference_price = 8.8948693600540167;
 
-    for(int inst = 0; inst < min(1,nInstances); ++inst) {
+    for(int inst = 0; inst < min(3,nInstances); ++inst) {
         // Create host mirrors for the grid views
         auto h_Vec_s = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_s);
         auto h_Vec_v = Kokkos::create_mirror_view(hostGrids[inst].device_Vec_v);
@@ -1055,7 +1055,7 @@ void test_deviceCallable_Do_solver_dividend() {
     const int m1 = 50;
     const int m2 = 25;
 
-    const int nInstances = 5;
+    const int nInstances = 10;
 
     //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
     //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
@@ -1190,7 +1190,7 @@ void test_deviceCallable_Do_solver_dividend() {
     auto t_start = timer::now();
 
     // Main kernel launch with modified internals
-    Kokkos::parallel_for("DO_scheme", policy,
+    Kokkos::parallel_for("DO_scheme_divid", policy,
         KOKKOS_LAMBDA(const team_policy::member_type& team) {
             const int instance = team.league_rank();
             
@@ -1311,7 +1311,7 @@ void test_deviceCallable_Do_solver_american_dividend() {
     const int m1 = 50;
     const int m2 = 25;
 
-    const int nInstances = 50;
+    const int nInstances = 10;
 
     //each instance gets its own strike. So we compute the Optioin price to nInstances of strikes in parallel
     //this is accounted for in the different grids (non uniform around strike) as well as the initial condition
@@ -2023,10 +2023,10 @@ void test_device_class() {
     //test_DEVICE_parallel_DO_scheme();  
     //test_parallel_DO_method();  
 
-    test_deviceCallable_Do_solver();
+    //test_deviceCallable_Do_solver();
     //test_deviceCallable_Do_solver_american();
     //test_deviceCallable_Do_solver_dividend();
-    //test_deviceCallable_Do_solver_american_dividend();
+    test_deviceCallable_Do_solver_american_dividend();
 
   }
   Kokkos::finalize();

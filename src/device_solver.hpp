@@ -241,7 +241,6 @@ void device_DO_timestepping(
             });
 
         // Step 2: A1 implicit solve
-        A1.multiply_parallel_v(U_i, A1_result_i, team);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
             [&](const int i) {
                 double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -252,10 +251,6 @@ void device_DO_timestepping(
         A1.solve_implicit_parallel_v(Y_1_i, Y_0_i, team);
 
         // Step 3: A2 shuffled implicit solve
-        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
-        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
-        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
-
         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
             [&](const int i) {
                 double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -336,7 +331,6 @@ void device_DO_timestepping_american(
             });
 
         // Step 2: A1 implicit solve
-        A1.multiply_parallel_v(U_i, A1_result_i, team);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
             [&](const int i) {
                 double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -347,9 +341,6 @@ void device_DO_timestepping_american(
         A1.solve_implicit_parallel_v(Y_1_i, Y_0_i, team);
 
         // Step 3: A2 shuffled implicit solve
-        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
-        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
-        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
 
         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
             [&](const int i) {
@@ -525,9 +516,6 @@ void device_DO_timestepping_dividend(
         }
         team.team_barrier();
         
-        
-        
-
     //This works, but is sequential in divident handling
     /*
     const int total_size = (m1+1)*(m2+1);
@@ -628,7 +616,6 @@ void device_DO_timestepping_dividend(
             });
 
         // Step 2: A1 implicit solve
-        A1.multiply_parallel_v(U_i, A1_result_i, team);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
             [&](const int i) {
                 double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -639,10 +626,6 @@ void device_DO_timestepping_dividend(
         A1.solve_implicit_parallel_v(Y_1_i, Y_0_i, team);
 
         // Step 3: A2 shuffled implicit solve
-        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
-        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
-        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
-
         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
             [&](const int i) {
                 double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -916,7 +899,6 @@ void device_DO_timestepping_american_dividend(
             });
 
         // Step 2: A1 implicit solve
-        A1.multiply_parallel_v(U_i, A1_result_i, team);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
             [&](const int i) {
                 double exp_factor_n = std::exp(r_f * delta_t * n);
@@ -927,10 +909,6 @@ void device_DO_timestepping_american_dividend(
         A1.solve_implicit_parallel_v(Y_1_i, Y_0_i, team);
 
         // Step 3: A2 shuffled implicit solve
-        device_shuffle_vector(U_i, U_shuffled_i, m1, m2, team);
-        A2.multiply_parallel_s(U_shuffled_i, A2_result_shuffled_i, team);
-        device_unshuffle_vector(A2_result_shuffled_i, A2_result_unshuf_i, m1, m2, team);
-
         Kokkos::parallel_for(Kokkos::TeamThreadRange(team, total_size),
             [&](const int i) {
                 double exp_factor_n = std::exp(r_f * delta_t * n);
