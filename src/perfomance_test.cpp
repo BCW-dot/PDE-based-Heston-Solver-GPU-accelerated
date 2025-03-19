@@ -47,8 +47,8 @@ void benchmark_DO_solver_performance_european(const std::string& output_filename
     const double theta = 0.8;
     
     // Vary grid sizes and instance counts
-    std::vector<int> grid_sizes_m2 = {25, 50, 100, 150};
-    std::vector<int> instance_counts = {5, 10, 20, 50, 100, 200, 300};
+    std::vector<int> grid_sizes_m2 = {25};//, 50, 100, 150};
+    std::vector<int> instance_counts = {1, 10, 20, 50, 100, 200, 300, 500};
     
     // Number of runs for each configuration to average
     const int NUM_RUNS = 10;
@@ -531,7 +531,7 @@ void test_european_call_performance(){
     std::replace(arch_name.begin(), arch_name.end(), '/', '_');
     std::replace(arch_name.begin(), arch_name.end(), '\\', '_');
 
-    std::string filename = base_dir + "performance_european_call_" + arch_name + ".csv";
+    std::string filename = base_dir + "25_performance_european_call_" + arch_name + ".csv";
 
 
     benchmark_DO_solver_performance_european(filename);
@@ -579,8 +579,8 @@ void test_dividend_performance(){
 void test_perfomance_Tests(){
     Kokkos::initialize();
     {
-      //test_european_call_performance();
-      test_dividend_performance();
+      test_european_call_performance();
+      //test_dividend_performance();
     }
     Kokkos::finalize();
 }

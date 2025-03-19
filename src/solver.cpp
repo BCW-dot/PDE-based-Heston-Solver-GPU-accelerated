@@ -48,636 +48,266 @@ public:
 };
 
 class ConvergenceExporter {
-public:
-    struct ConvergenceData {
-        std::vector<int> m1_sizes;     // Stock price dimensions
-        std::vector<int> m2_sizes;     // Variance dimensions
-        std::vector<double> errors;    // Relative errors
-        std::vector<double> times;     // Computation times
-        std::vector<double> prices;    // Computed prices
+    public:
+        struct ConvergenceData {
+            std::vector<int> m1_sizes;     // Stock price dimensions
+            std::vector<int> m2_sizes;     // Variance dimensions
+            std::vector<double> errors;    // Relative errors
+            std::vector<double> times;     // Computation times
+            std::vector<double> prices;    // Computed prices
+        };
+    
+        // Simplified method with m1 = 2*m2 relationship
+        static ConvergenceData testWithRelatedGridSizes(
+                                               const std::vector<int>& m2_sizes,
+                                               double ref_price,
+                                               const double K,
+                                               const double S_0,
+                                               const double V_0,
+                                               const double T,
+                                               const double r_d,
+                                               const double r_f,
+                                               const double rho,
+                                               const double sigma,
+                                               const double kappa,
+                                               const double eta,
+                                               bool useShuffled = false) {
+            ConvergenceData data;
+            data.m2_sizes = m2_sizes;
+            data.m1_sizes.resize(m2_sizes.size());
+            
+            for (size_t i = 0; i < m2_sizes.size(); ++i) {
+                int m2 = m2_sizes[i];
+                int m1 = 2 * m2;  // Enforce the relationship m1 = 2*m2
+                data.m1_sizes[i] = m1;
+                
+                // Record dimensions
+                std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
+                
+                // Setup grid and matrices
+                int m = (m1 + 1) * (m2 + 1);
+                Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+                
+                // Initialize matrices
+                heston_A0Storage_gpu A0(m1, m2);
+                heston_A1Storage_gpu A1(m1, m2);
+                
+                A0.build_matrix(grid, rho, sigma);
+                A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    
+                const int N = 20;
+                const double delta_t = T / N;
+                const double theta = 0.8;
+    
+                // Build implicit matrices
+                A1.build_implicit(theta, delta_t);
+    
+                // Initialize boundary conditions
+                BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+                bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
+    
+                // Initial condition
+                Kokkos::View<double*> U_0("U_0", m);
+                Kokkos::View<double*> U("U", m);
+                
+                auto h_U_0 = Kokkos::create_mirror_view(U_0);
+                for(int j = 0; j <= m2; j++) {
+                    for(int i = 0; i <= m1; i++) {
+                        h_U_0[i + j*(m1+1)] = std::max(grid.Vec_s[i] - K, 0.0);
+                    }
+                }
+                Kokkos::deep_copy(U_0, h_U_0);
+    
+                int repeats = 20;
+                double totalTime = 0.0;
+    
+                if (useShuffled) {
+                    // Use shuffled version
+                    heston_A2_shuffled A2_shuf(m1, m2);
+                    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+                    A2_shuf.build_implicit(theta, delta_t);
+                    
+                    for (int i = 0; i < repeats; i++) {
+                        auto start = std::chrono::high_resolution_clock::now();
+                        DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
+                        auto end = std::chrono::high_resolution_clock::now();
+                        std::chrono::duration<double> iterationDuration = (end - start);
+                        totalTime += iterationDuration.count();
+                    }
+                } else {
+                    // Use standard version
+                    heston_A2Storage_gpu A2(m1, m2);
+                    A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+                    A2.build_implicit(theta, delta_t);
+                    
+                    for (int i = 0; i < repeats; i++) {
+                        auto start = std::chrono::high_resolution_clock::now();
+                        DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+                        auto end = std::chrono::high_resolution_clock::now();
+                        std::chrono::duration<double> iterationDuration = (end - start);
+                        totalTime += iterationDuration.count();
+                    }
+                }
+                
+                double averageTime = totalTime / repeats;
+    
+                // Get price
+                auto h_U = Kokkos::create_mirror_view(U);
+                Kokkos::deep_copy(h_U, U);
+    
+                int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+                int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+                double price = h_U[index_s + index_v*(m1+1)];
+                
+                // Store results
+                data.times.push_back(averageTime);
+                data.prices.push_back(price);
+                data.errors.push_back(std::abs(price - ref_price) / ref_price);
+            }
+            
+            return data;
+        }
+    
+        // Time step convergence test remains mostly the same
+        static ConvergenceData testVaryTimeSteps(
+                                              int m2,  // Base m2 size
+                                              const std::vector<int>& N_steps,
+                                              double ref_price,
+                                              const double K,
+                                              const double S_0,
+                                              const double V_0,
+                                              const double T,
+                                              const double r_d,
+                                              const double r_f,
+                                              const double rho,
+                                              const double sigma,
+                                              const double kappa,
+                                              const double eta,
+                                              bool useShuffled = false) {
+            ConvergenceData data;
+            // Store N values in m2_sizes for compatibility with export function
+            data.m2_sizes = N_steps;
+            
+            // Set fixed grid dimensions with m1 = 2*m2
+            int m2_fixed = m2;
+            int m1_fixed = 2 * m2_fixed;
+            
+            for (int N : N_steps) {
+                std::cout << "Testing with N = " << N << " time steps" << std::endl;
+                int m1 = m1_fixed;
+                int m2 = m2_fixed;
+                int m = (m1 + 1) * (m2 + 1);
+    
+                Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+                
+                heston_A0Storage_gpu A0(m1, m2);
+                heston_A1Storage_gpu A1(m1, m2);
+    
+                A0.build_matrix(grid, rho, sigma);
+                A1.build_matrix(grid, rho, sigma, r_d, r_f);
+    
+                const double delta_t = T / N;
+                const double theta = 0.8;
+    
+                A1.build_implicit(theta, delta_t);
+    
+                BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
+                bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
+    
+                Kokkos::View<double*> U_0("U_0", m);
+                Kokkos::View<double*> U("U", m);
+                
+                auto h_U_0 = Kokkos::create_mirror_view(U_0);
+                for(int j = 0; j <= m2; j++) {
+                    for(int i = 0; i <= m1; i++) {
+                        h_U_0[i + j*(m1+1)] = std::max(grid.Vec_s[i] - K, 0.0);
+                    }
+                }
+                Kokkos::deep_copy(U_0, h_U_0);
+    
+                int repeats = 20;
+                double totalTime = 0.0;
+    
+                if (useShuffled) {
+                    // Use shuffled version
+                    heston_A2_shuffled A2_shuf(m1, m2);
+                    A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+                    A2_shuf.build_implicit(theta, delta_t);
+                    
+                    for (int i = 0; i < repeats; i++) {
+                        auto start = std::chrono::high_resolution_clock::now();
+                        DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
+                        auto end = std::chrono::high_resolution_clock::now();
+                        std::chrono::duration<double> iterationDuration = (end - start);
+                        totalTime += iterationDuration.count();
+                    }
+                } else {
+                    // Use standard version
+                    heston_A2Storage_gpu A2(m1, m2);
+                    A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
+                    A2.build_implicit(theta, delta_t);
+                    
+                    for (int i = 0; i < repeats; i++) {
+                        auto start = std::chrono::high_resolution_clock::now();
+                        DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
+                        auto end = std::chrono::high_resolution_clock::now();
+                        std::chrono::duration<double> iterationDuration = (end - start);
+                        totalTime += iterationDuration.count();
+                    }
+                }
+                
+                double averageTime = totalTime / repeats;
+    
+                auto h_U = Kokkos::create_mirror_view(U);
+                Kokkos::deep_copy(h_U, U);
+    
+                int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
+                int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
+                double price = h_U[index_s + index_v*(m1+1)];
+    
+                // Store m1, m2 dimensions for consistency with data structure
+                data.m1_sizes.push_back(m1);
+                data.times.push_back(averageTime);
+                data.prices.push_back(price);
+                data.errors.push_back(std::abs(price - ref_price) / ref_price);
+            }
+            
+            return data;
+        }
+    
+        // Export functions remain the same
+        static void exportToCSV(const std::string& filename, const ConvergenceData& data) {
+            std::ofstream file(filename + "_convergence.csv");
+            
+            // Write header
+            file << "m1,m2,price,error,time\n";
+            
+            // Write data
+            for (size_t i = 0; i < data.m1_sizes.size(); ++i) {
+                file << data.m1_sizes[i] << ","
+                     << data.m2_sizes[i] << ","
+                     << std::scientific << std::setprecision(10) << data.prices[i] << ","
+                     << data.errors[i] << ","
+                     << data.times[i] << "\n";
+            }
+        }
+    
+        // For time step convergence, it's helpful to indicate N in the column heading
+        static void exportTimeStepConvergenceToCSV(const std::string& filename, const ConvergenceData& data) {
+            std::ofstream file(filename + "_timestep_convergence.csv");
+            
+            file << "N,m1,m2,price,error,time\n";
+            
+            for (size_t i = 0; i < data.m2_sizes.size(); ++i) {
+                file << data.m2_sizes[i] << ","  // N values stored in m2_sizes
+                     << data.m1_sizes[i] << ","
+                     << (data.m1_sizes[i] / 2) << ","  // m2 = m1/2
+                     << std::scientific << std::setprecision(10) << data.prices[i] << ","
+                     << data.errors[i] << ","
+                     << data.times[i] << "\n";
+            }
+        }
     };
-
-    // New struct for time step convergence
-    struct TimeStepData {
-        std::vector<int> N_values;     // Number of time steps
-        std::vector<double> errors;
-        std::vector<double> times;
-        std::vector<double> prices;
-    };
-
-    static ConvergenceData testFixedM2VaryM1(int fixed_m2, 
-                                           const std::vector<int>& m1_sizes,
-                                           double ref_price,
-                                           const double K,
-                                           const double S_0,
-                                           const double V_0,
-                                           const double T,
-                                           const double r_d,
-                                           const double r_f,
-                                           const double rho,
-                                           const double sigma,
-                                           const double kappa,
-                                           const double eta) {
-        ConvergenceData data;
-        data.m1_sizes = m1_sizes;
-        data.m2_sizes.resize(m1_sizes.size(), fixed_m2);
-        
-        for (size_t i = 0; i < m1_sizes.size(); ++i) {
-            int m1 = m1_sizes[i];
-            int m2 = fixed_m2;// int(m1/2);
-            
-            // Record dimensions
-            std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
-            
-            // Setup grid and matrices
-            int m = (m1 + 1) * (m2 + 1);
-            Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
-            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
-            
-            // Initialize matrices
-            heston_A0Storage_gpu A0(m1, m2);
-            heston_A1Storage_gpu A1(m1, m2);
-            heston_A2Storage_gpu A2(m1, m2);
-
-            A0.build_matrix(grid, rho, sigma);
-            A1.build_matrix(grid, rho, sigma, r_d, r_f);
-            A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-
-            const int N = 20;
-            const double delta_t = T / N;
-            const double theta = 0.8;
-
-            // Build implicit matrices
-            A1.build_implicit(theta, delta_t);
-            A2.build_implicit(theta, delta_t);
-
-            // Initialize boundary conditions
-            BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
-            bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
-
-            // Initial condition
-            Kokkos::View<double*> U_0("U_0", m);
-            Kokkos::View<double*> U("U", m);
-            
-            auto h_U_0 = Kokkos::create_mirror_view(U_0);
-            for(int j = 0; j <= m2; j++) {
-                for(int i = 0; i <= m1; i++) {
-                    h_U_0[i + j*(m1+1)] = std::max(grid.Vec_s[i] - K, 0.0);
-                }
-            }
-            Kokkos::deep_copy(U_0, h_U_0);
-
-            // Start timing
-            auto start = std::chrono::high_resolution_clock::now();
-
-            // Record time
-            auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> duration = end - start;
-
-
-            int repeats = 20;
-            double totalTime = 0.0;
-
-            for (int i = 0; i < repeats; i++) {
-                auto start = std::chrono::high_resolution_clock::now();
-                
-                //run the solver
-                DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-                //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-            
-                auto end = std::chrono::high_resolution_clock::now();
-                // Duration in seconds for this single call
-                std::chrono::duration<double> iterationDuration = (end - start);
-            
-                // Accumulate the time
-                totalTime += iterationDuration.count();
-            }
-            
-            double averageTime = totalTime / repeats;
-
-            // Get price
-            auto h_U = Kokkos::create_mirror_view(U);
-            Kokkos::deep_copy(h_U, U);
-
-            int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
-            int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
-            double price = h_U[index_s + index_v*(m1+1)];
-            
-            // Store results
-            data.times.push_back(averageTime);
-            data.prices.push_back(price);
-            data.errors.push_back(std::abs(price - ref_price) / ref_price);
-        }
-        
-        return data;
-    }
-
-    static ConvergenceData testFixedM1VaryM2(int fixed_m1, 
-                                           const std::vector<int>& m2_sizes,
-                                           double ref_price,
-                                           const double K,
-                                           const double S_0,
-                                           const double V_0,
-                                           const double T,
-                                           const double r_d,
-                                           const double r_f,
-                                           const double rho,
-                                           const double sigma,
-                                           const double kappa,
-                                           const double eta) {
-        ConvergenceData data;
-        data.m2_sizes = m2_sizes;
-        data.m1_sizes.resize(m2_sizes.size(), fixed_m1);
-        
-        for (size_t i = 0; i < m2_sizes.size(); ++i) {
-            int m1 = fixed_m1;
-            int m2 = m2_sizes[i];
-            //int m1 = m2 *2;
-            
-            // Record dimensions
-            std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
-            
-            // Setup grid and matrices
-            int m = (m1 + 1) * (m2 + 1);
-            Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
-            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
-            
-            // Initialize matrices
-            heston_A0Storage_gpu A0(m1, m2);
-            heston_A1Storage_gpu A1(m1, m2);
-            heston_A2Storage_gpu A2(m1, m2);
-
-            A0.build_matrix(grid, rho, sigma);
-            A1.build_matrix(grid, rho, sigma, r_d, r_f);
-            A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-
-            const int N = 20;
-            const double delta_t = T / N;
-            const double theta = 0.8;
-
-            // Build implicit matrices
-            A1.build_implicit(theta, delta_t);
-            A2.build_implicit(theta, delta_t);
-
-            // Initialize boundary conditions
-            BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
-            bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
-
-            // Initial condition
-            Kokkos::View<double*> U_0("U_0", m);
-            Kokkos::View<double*> U("U", m);
-            
-            auto h_U_0 = Kokkos::create_mirror_view(U_0);
-            for(int j = 0; j <= m2; j++) {
-                for(int i = 0; i <= m1; i++) {
-                    h_U_0[i + j*(m1+1)] = std::max(grid.Vec_s[i] - K, 0.0);
-                }
-            }
-            Kokkos::deep_copy(U_0, h_U_0);
-
-            int repeats = 20;
-            double totalTime = 0.0;
-
-            for (int i = 0; i < repeats; i++) {
-                auto start = std::chrono::high_resolution_clock::now();
-                
-                //run the solver
-                DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-                //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-            
-                auto end = std::chrono::high_resolution_clock::now();
-                // Duration in seconds for this single call
-                std::chrono::duration<double> iterationDuration = (end - start);
-            
-                // Accumulate the time
-                totalTime += iterationDuration.count();
-            }
-            
-            double averageTime = totalTime / repeats;
-
-            // Get price
-            auto h_U = Kokkos::create_mirror_view(U);
-            Kokkos::deep_copy(h_U, U);
-
-            int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
-            int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
-            double price = h_U[index_s + index_v*(m1+1)];
-            
-            
-            // Store results
-            data.times.push_back(averageTime);
-            data.prices.push_back(price);
-            data.errors.push_back(std::abs(price - ref_price) / ref_price);
-        }
-        
-        return data;
-    }
-
-    
-    static TimeStepData testVaryTimeSteps(int fixed_m1,
-                                          int fixed_m2,
-                                          const std::vector<int>& N_steps,
-                                          double ref_price,
-                                          const double K,
-                                          const double S_0,
-                                          const double V_0,
-                                          const double T,
-                                          const double r_d,
-                                          const double r_f,
-                                          const double rho,
-                                          const double sigma,
-                                          const double kappa,
-                                          const double eta) {
-        TimeStepData data;
-        data.N_values = N_steps;
-        
-        for (int N : N_steps) {
-            std::cout << "Testing with N = " << N << " time steps" << std::endl;
-            int m1 = fixed_m1;
-            int m2 = fixed_m2;
-            int m = (m1 + 1) * (m2 + 1);
-
-            Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
-            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
-            
-            heston_A0Storage_gpu A0(m1, m2);
-            heston_A1Storage_gpu A1(m1, m2);
-            heston_A2Storage_gpu A2(m1, m2);
-
-            A0.build_matrix(grid, rho, sigma);
-            A1.build_matrix(grid, rho, sigma, r_d, r_f);
-            A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-
-            const double delta_t = T / N;
-            const double theta = 0.8;
-
-            A1.build_implicit(theta, delta_t);
-            A2.build_implicit(theta, delta_t);
-
-            BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
-            bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
-
-            Kokkos::View<double*> U_0("U_0", m);
-            Kokkos::View<double*> U("U", m);
-            
-            auto h_U_0 = Kokkos::create_mirror_view(U_0);
-            for(int j = 0; j <= m2; j++) {
-                for(int i = 0; i <= m1; i++) {
-                    h_U_0[i + j*(m1+1)] = std::max(grid.Vec_s[i] - K, 0.0);
-                }
-            }
-            Kokkos::deep_copy(U_0, h_U_0);
-
-            int repeats = 20;
-            double totalTime = 0.0;
-
-            for (int i = 0; i < repeats; i++) {
-                auto start = std::chrono::high_resolution_clock::now();
-                
-                //run the solver
-                DO_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-                //CS_scheme<Kokkos::View<double*>>(m, N, U_0, delta_t, theta, A0, A1, A2, bounds, r_f, U);
-            
-                auto end = std::chrono::high_resolution_clock::now();
-                // Duration in seconds for this single call
-                std::chrono::duration<double> iterationDuration = (end - start);
-            
-                // Accumulate the time
-                totalTime += iterationDuration.count();
-            }
-            
-            double averageTime = totalTime / repeats;
-
-            auto h_U = Kokkos::create_mirror_view(U);
-            Kokkos::deep_copy(h_U, U);
-
-            int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
-            int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
-            double price = h_U[index_s + index_v*(m1+1)];
-
-            data.times.push_back(averageTime);
-            data.prices.push_back(price);
-            data.errors.push_back(std::abs(price - ref_price) / ref_price);
-        }
-        
-        return data;
-    }
-    
-    static ConvergenceData testFixedM2VaryM1_shuffled(int fixed_m2, 
-                                                 const std::vector<int>& m1_sizes,
-                                                 double ref_price,
-                                                 const double K,
-                                                 const double S_0,
-                                                 const double V_0,
-                                                 const double T,
-                                                 const double r_d,
-                                                 const double r_f,
-                                                 const double rho,
-                                                 const double sigma,
-                                                 const double kappa,
-                                                 const double eta) {
-    ConvergenceData data;
-    data.m1_sizes = m1_sizes;
-    data.m2_sizes.resize(m1_sizes.size(), fixed_m2);
-    
-    for (size_t i = 0; i < m1_sizes.size(); ++i) {
-        int m1 = m1_sizes[i];
-        int m2 = fixed_m2;
-        
-        int m = (m1 + 1) * (m2 + 1);
-        
-        Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
-        //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
-        
-        // Initialize all matrices including shuffled A2
-        heston_A0Storage_gpu A0(m1, m2);
-        heston_A1Storage_gpu A1(m1, m2);
-        //heston_A2Storage_gpu A2(m1, m2);
-        heston_A2_shuffled A2_shuf(m1, m2);
-
-        A0.build_matrix(grid, rho, sigma);
-        A1.build_matrix(grid, rho, sigma, r_d, r_f);
-        //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-        A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-
-        const int N = 20;
-        const double delta_t = T / N;
-        const double theta = 0.8;
-
-        A1.build_implicit(theta, delta_t);
-        //A2.build_implicit(theta, delta_t);
-        A2_shuf.build_implicit(theta, delta_t);
-
-        BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
-        bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
-
-        Kokkos::View<double*> U_0("U_0", m);
-        Kokkos::View<double*> U("U", m);
-        
-        auto h_U_0 = Kokkos::create_mirror_view(U_0);
-        for(int j = 0; j <= m2; j++) {
-            for(int i = 0; i <= m1; i++) {
-                h_U_0[i + j*(m1+1)] = std::max(grid.Vec_s[i] - K, 0.0);
-            }
-        }
-        Kokkos::deep_copy(U_0, h_U_0);
-
-        int repeats = 20;
-        double totalTime = 0.0;
-
-        for (int i = 0; i < repeats; i++) {
-            auto start = std::chrono::high_resolution_clock::now();
-            
-            // Call your function once
-            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
-        
-            auto end = std::chrono::high_resolution_clock::now();
-            // Duration in seconds for this single call
-            std::chrono::duration<double> iterationDuration = (end - start);
-        
-            // Accumulate the time
-            totalTime += iterationDuration.count();
-        }
-        
-        double averageTime = totalTime / repeats;
-
-
-        auto h_U = Kokkos::create_mirror_view(U);
-        Kokkos::deep_copy(h_U, U);
-
-        int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
-        int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
-        double price = h_U[index_s + index_v*(m1+1)];
-        
-        
-        data.times.push_back(averageTime);
-        data.prices.push_back(price);
-        data.errors.push_back(std::abs(price - ref_price) / ref_price);
-    }
-
-    return data;
-}
-
-    static ConvergenceData testFixedM1VaryM2_shuffled(int fixed_m1, 
-                                                 const std::vector<int>& m2_sizes,
-                                                 double ref_price,
-                                                 const double K,
-                                                 const double S_0,
-                                                 const double V_0,
-                                                 const double T,
-                                                 const double r_d,
-                                                 const double r_f,
-                                                 const double rho,
-                                                 const double sigma,
-                                                 const double kappa,
-                                                 const double eta) {
-        ConvergenceData data;
-        data.m2_sizes = m2_sizes;
-
-        data.m1_sizes.resize(m2_sizes.size(), fixed_m1);
-        
-        for (size_t i = 0; i < m2_sizes.size(); ++i) {
-            int m1 = fixed_m1;
-            int m2 = m2_sizes[i];
-
-            //data.m1_sizes.push_back(2*m2_sizes[i]);
-            //int m2 = m2_sizes[i];
-            //int m1 = 2*m2;
-            
-            std::cout << "Testing m1 = " << m1 << ", m2 = " << m2 << std::endl;
-            
-            int m = (m1 + 1) * (m2 + 1);
-            
-            Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
-            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
-            
-            // Initialize matrices including shuffled A2
-            heston_A0Storage_gpu A0(m1, m2);
-            heston_A1Storage_gpu A1(m1, m2);
-            heston_A2_shuffled A2_shuf(m1, m2);
-
-            A0.build_matrix(grid, rho, sigma);
-            A1.build_matrix(grid, rho, sigma, r_d, r_f);
-            A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-
-            const int N = 20;
-            const double delta_t = T / N;
-            const double theta = 0.8;
-
-            A1.build_implicit(theta, delta_t);
-            A2_shuf.build_implicit(theta, delta_t);
-
-            BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
-            bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
-
-            Kokkos::View<double*> U_0("U_0", m);
-            Kokkos::View<double*> U("U", m);
-            
-            auto h_U_0 = Kokkos::create_mirror_view(U_0);
-            for(int j = 0; j <= m2; j++) {
-                for(int i = 0; i <= m1; i++) {
-                    h_U_0[i + j*(m1+1)] = std::max(grid.Vec_s[i] - K, 0.0);
-                }
-            }
-            Kokkos::deep_copy(U_0, h_U_0);
-
-            int repeats = 20;
-            double totalTime = 0.0;
-
-            for (int i = 0; i < repeats; i++) {
-                auto start = std::chrono::high_resolution_clock::now();
-                
-                // Call function once
-                DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
-            
-                auto end = std::chrono::high_resolution_clock::now();
-                // Duration in seconds for this single call
-                std::chrono::duration<double> iterationDuration = (end - start);
-            
-                // Accumulate the time
-                totalTime += iterationDuration.count();
-            }
-            
-            double averageTime = totalTime / repeats;
-
-            auto h_U = Kokkos::create_mirror_view(U);
-            Kokkos::deep_copy(h_U, U);
-
-            int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
-            int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
-            double price = h_U[index_s + index_v*(m1+1)];
-            
-            data.times.push_back(averageTime);
-            data.prices.push_back(price);
-            data.errors.push_back(std::abs(price - ref_price) / ref_price);
-        }
-        
-        return data;
-    }
-
-    static TimeStepData testVaryTimeSteps_shuffled(int fixed_m1,
-                                                int fixed_m2,
-                                                const std::vector<int>& N_steps,
-                                                double ref_price,
-                                                const double K,
-                                                const double S_0,
-                                                const double V_0,
-                                                const double T,
-                                                const double r_d,
-                                                const double r_f,
-                                                const double rho,
-                                                const double sigma,
-                                                const double kappa,
-                                                const double eta) {
-        TimeStepData data;
-        data.N_values = N_steps;
-        
-        for (int N : N_steps) {
-            std::cout << "Testing with N = " << N << " time steps" << std::endl;
-            int m1 = fixed_m1;
-            int m2 = fixed_m2;
-            int m = (m1 + 1) * (m2 + 1);
-
-            Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
-            //Grid grid = create_uniform_grid(m1, m2, S_0, V_0);
-            
-            heston_A0Storage_gpu A0(m1, m2);
-            heston_A1Storage_gpu A1(m1, m2);
-            //heston_A2Storage_gpu A2(m1, m2);
-            heston_A2_shuffled A2_shuf(m1, m2);
-
-            A0.build_matrix(grid, rho, sigma);
-            A1.build_matrix(grid, rho, sigma, r_d, r_f);
-            //A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-            A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-
-            const double delta_t = T / N;
-            const double theta = 0.8;
-
-            A1.build_implicit(theta, delta_t);
-            //A2.build_implicit(theta, delta_t);
-            A2_shuf.build_implicit(theta, delta_t);
-
-            BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
-            bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), grid.Vec_s.size()));
-
-            Kokkos::View<double*> U_0("U_0", m);
-            Kokkos::View<double*> U("U", m);
-            
-            auto h_U_0 = Kokkos::create_mirror_view(U_0);
-            for(int j = 0; j <= m2; j++) {
-                for(int i = 0; i <= m1; i++) {
-                    h_U_0[i + j*(m1+1)] = std::max(grid.Vec_s[i] - K, 0.0);
-                }
-            }
-            Kokkos::deep_copy(U_0, h_U_0);
-
-            int repeats = 20;
-            double totalTime = 0.0;
-
-            for (int i = 0; i < repeats; i++) {
-                auto start = std::chrono::high_resolution_clock::now();
-                
-                // Call your function once
-                DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);
-            
-                auto end = std::chrono::high_resolution_clock::now();
-                // Duration in seconds for this single call
-                std::chrono::duration<double> iterationDuration = (end - start);
-            
-                // Accumulate the time
-                totalTime += iterationDuration.count();
-            }
-            
-            double averageTime = totalTime / repeats;
-
-            auto h_U = Kokkos::create_mirror_view(U);
-            Kokkos::deep_copy(h_U, U);
-
-            int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
-            int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
-            double price = h_U[index_s + index_v*(m1+1)];
-
-            data.times.push_back(averageTime);
-            data.prices.push_back(price);
-            data.errors.push_back(std::abs(price - ref_price) / ref_price);
-        }
-        
-        return data;
-    }
-
-
-    // Export time step convergence results
-    static void exportTimeStepConvergenceToCSV(const std::string& filename, const TimeStepData& data) {
-        std::ofstream file(filename + "_timestep_convergence.csv");
-        
-        file << "N,price,error,time\n";
-        
-        for (size_t i = 0; i < data.N_values.size(); ++i) {
-            file << data.N_values[i] << ","
-                 << std::scientific << std::setprecision(10) << data.prices[i] << ","
-                 << data.errors[i] << ","
-                 << data.times[i] << "\n";
-        }
-    }
-
-    //Exporting space step convergence results
-    static void exportToCSV(const std::string& filename, const ConvergenceData& data) {
-        std::ofstream file(filename + "_convergence.csv");
-        
-        // Write header
-        file << "m1,m2,price,error,time\n";
-        
-        // Write data
-        for (size_t i = 0; i < data.m1_sizes.size(); ++i) {
-            file << data.m1_sizes[i] << ","
-                 << data.m2_sizes[i] << ","
-                 << std::scientific << std::setprecision(10) << data.prices[i] << ","
-                 << data.errors[i] << ","
-                 << data.times[i] << "\n";
-        }
-    }
-};
 
 /*
 
@@ -772,88 +402,7 @@ void test_heston_call(){
     ResultsExporter::exportToCSV("heston_do_scheme", grid, U);
 }
 
-void test_DO_m1_convergence() {
-    // Market parameters
-    const double K = 100.0;
-    const double S_0 = 100.0;
-    const double V_0 = 0.04;
-    const double T = 1.0;
-    const double r_d = 0.025;
-    const double r_f = 0.0;
-    const double rho = -0.9;
-    const double sigma = 0.3;
-    const double kappa = 1.5;
-    const double eta = 0.04;
-    
-    const double ref_price = 8.8948693600540167;
-    
-    // Test parameters
-    std::vector<int> m1_sizes = {20, 30, 40, 50, 60, 70, 80, 100, 120, 170, 200, 250, 300};
-    int fixed_m2 = 50;
-    
-    std::cout << "Starting convergence test with fixed m2 = " << fixed_m2 << std::endl;
-    
-    auto data = ConvergenceExporter::testFixedM2VaryM1(
-        fixed_m2, m1_sizes, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    
-    ConvergenceExporter::exportToCSV("do_scheme", data);
-    
-    std::cout << "\nResults:" << std::endl;
-    std::cout << "m1\tError\t\tTime" << std::endl;
-    for (size_t i = 0; i < data.m1_sizes.size(); ++i) {
-        std::cout << data.m1_sizes[i] << "\t"
-                    << std::scientific << data.errors[i] << "\t"
-                    << std::fixed << data.times[i] << "s" << std::endl;
-    }
-}
 
-void test_all_convergence() {
-    // Market parameters
-
-    const double K = 100.0;
-    const double S_0 = 100.0;
-    const double V_0 = 0.04;
-
-    const double T = 1.0;
-
-    const double r_d = 0.025;
-    const double r_f = 0.0;
-
-    const double rho = -0.9;
-    const double sigma = 0.3;
-    const double kappa = 1.5;
-    const double eta = 0.04;
-    
-    const double ref_price = 8.8948693600540167;
-    
-    // Test m1 convergence
-    std::vector<int> m1_sizes = {50, 75, 100, 150, 200, 250, 300};
-    int fixed_m2 = 100;
-    auto data_m1 = ConvergenceExporter::testFixedM2VaryM1(
-        fixed_m2, m1_sizes, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    ConvergenceExporter::exportToCSV("do_scheme_m1", data_m1);
-    
-    // Test m2 convergence
-    std::vector<int> m2_sizes = {30, 50, 70, 75, 85, 90, 100};
-    int fixed_m1 = 100;
-    auto data_m2 = ConvergenceExporter::testFixedM1VaryM2(
-        fixed_m1, m2_sizes, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    ConvergenceExporter::exportToCSV("do_scheme_m2", data_m2);
-    
-    // Test time step convergence
-    std::vector<int> N_steps = {10, 20, 30, 40, 50, 60, 70};
-    auto data_N = ConvergenceExporter::testVaryTimeSteps(
-        100, 50, N_steps, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    ConvergenceExporter::exportTimeStepConvergenceToCSV("do_scheme_N", data_N);
-}
 
 /*
 
@@ -956,190 +505,6 @@ void test_heston_call_shuffled() {
     ResultsExporter::exportToCSV("shuffled_heston_do_scheme", grid, U);
 }
 
-//convergence of shuffle vor varyieng m1 direction
-void test_heston_call_shuffled_vary_m1() {
-    // Fixed parameters
-    double K = 100.0;
-    double S_0 = K;
-    double V_0 = 0.04;
-    double T = 1.0;
-    double r_d = 0.025;
-    double r_f = 0.0;
-    double rho = -0.9;
-    double sigma = 0.3;
-    double kappa = 1.5;
-    double eta = 0.04;
-    const double reference_price = 8.8948693600540167;
-
-    // Fixed m2 and vary m1
-    int fixed_m2 = 100;
-    std::vector<int> m1_values = {50, 100, 150, 200, 250, 300, 350, 400};
-    
-    std::cout << "\nTesting with different m1 values (fixed m2=" << fixed_m2 << "):\n";
-    std::cout << std::left  // Left align text
-              << std::setw(8) << "m1"
-              << std::setw(12) << "Price"
-              << std::setw(12) << "Rel. Error"
-              << std::setw(12) << "Min Time(s)"
-              << std::setw(12) << "Avg Time(s)" << "\n";
-    std::cout << std::string(56, '-') << "\n";
-
-    for(int m1 : m1_values) {
-        int m2 = fixed_m2;
-        int m = (m1 + 1) * (m2 + 1);
-        int N = 20;
-        double theta = 0.5;
-
-        // Create grid
-        Grid grid = create_test_grid(m1, m2);
-
-        // Initialize matrices
-        heston_A0Storage_gpu A0(m1, m2);
-        heston_A1Storage_gpu A1(m1, m2);
-        heston_A2Storage_gpu A2(m1, m2);
-        heston_A2_shuffled A2_shuf(m1, m2);
-
-        // Build matrices
-        A0.build_matrix(grid, rho, sigma);
-        A1.build_matrix(grid, rho, sigma, r_d, r_f);
-        A2.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-        A2_shuf.build_matrix(grid, rho, sigma, r_d, kappa, eta);
-
-        double delta_t = T / N;
-
-        // Build boundary conditions
-        BoundaryConditions bounds(m1, m2, r_d, r_f, N, delta_t);
-        bounds.initialize(Kokkos::View<double*>(grid.Vec_s.data(), m1 + 1));
-
-        // Initial condition
-        Kokkos::View<double*> U_0("U_0", m);
-        Kokkos::View<double*> U("U", m);
-
-        auto h_U_0 = Kokkos::create_mirror_view(U_0);
-        for (int j = 0; j <= m2; j++) {
-            for (int i = 0; i <= m1; i++) {
-                h_U_0(i + j * (m1 + 1)) = std::max(grid.Vec_s[i] - K, 0.0);
-            }
-        }
-        Kokkos::deep_copy(U_0, h_U_0);
-
-        // Build implicit matrices
-        A1.build_implicit(theta, delta_t);
-        A2.build_implicit(theta, delta_t);
-        A2_shuf.build_implicit(theta, delta_t);
-
-        // Run solver multiple times and measure performance
-        const int num_runs = 1;
-        std::vector<double> run_times;
-        
-        for(int i = 0; i < num_runs; i++) {
-            auto start = std::chrono::high_resolution_clock::now();
-            
-            DO_scheme_shuffle(m, m1, m2, N, U_0, delta_t, theta, A0, A1, A2_shuf, bounds, r_f, U);//A2, A2_shuf, bounds, r_f, U);
-            
-            auto end = std::chrono::high_resolution_clock::now();
-            double duration = std::chrono::duration<double>(end - start).count();
-            run_times.push_back(duration);
-        }
-
-        // Get final result
-        auto h_U = Kokkos::create_mirror_view(U);
-        Kokkos::deep_copy(h_U, U);
-
-        int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
-        int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
-        double option_price = h_U[index_s + index_v*(m1+1)];
-
-        // Calculate relative error
-        double rel_error = std::abs(option_price - reference_price)/reference_price;
-
-        // Calculate min and average time
-        double min_time = *std::min_element(run_times.begin(), run_times.end());
-        double avg_time = std::accumulate(run_times.begin(), run_times.end(), 0.0) / num_runs;
-
-        // Print results
-        std::cout << std::left
-                  << std::setw(8) << m1 
-                  << std::fixed << std::setprecision(5)
-                  << std::setw(12) << option_price
-                  << std::setw(12) << rel_error
-                  << std::setw(12) << min_time
-                  << std::setw(12) << avg_time << "\n";
-    }
-}
-
-//same as above just for m2
-void test_DO_shuffle_m2_convergence() {
-    // Market parameters
-    const double K = 100.0;
-    const double S_0 = 100.0;
-    const double V_0 = 0.04;
-    const double T = 1.0;
-    const double r_d = 0.025;
-    const double r_f = 0.0;
-    const double rho = -0.9;
-    const double sigma = 0.3;
-    const double kappa = 1.5;
-    const double eta = 0.04;
-    
-    const double ref_price = 8.8948693600540167;
-    
-    // Test parameters
-    std::vector<int> m2_sizes = {25, 50, 70, 81, 90, 101, 126, 150};
-    int fixed_m1 = 100;
-    auto data_m2 = ConvergenceExporter::testFixedM1VaryM2_shuffled(
-        fixed_m1, m2_sizes, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    
-    ConvergenceExporter::exportToCSV("do_scheme_shuffle_m2", data_m2);
-}
-
-//does both directions
-void test_shuffled_convergence() {
-    // Market parameters (same as before)
-    const double K = 100.0;
-    const double S_0 = 100.0;
-    const double V_0 = 0.04;
-
-    const double T = 1.0;
-
-    const double r_d = 0.025;
-    const double r_f = 0.0;
-
-    const double rho = -0.9;
-    const double sigma = 0.3;
-    const double kappa = 1.5;
-    const double eta = 0.04;
-    
-    const double ref_price = 8.8948693600540167;
-    
-    // Test m1 convergence
-    std::vector<int> m1_sizes = {50, 75, 100, 150, 201, 250, 300};
-    int fixed_m2 = 100;
-    auto data_m1 = ConvergenceExporter::testFixedM2VaryM1_shuffled(
-        fixed_m2, m1_sizes, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    ConvergenceExporter::exportToCSV("do_scheme_shuffled_m1", data_m1);
-    
-    // Test m2 convergence
-    std::vector<int> m2_sizes = {30, 50, 70, 75, 85, 90, 100};
-    int fixed_m1 = 100;
-    auto data_m2 = ConvergenceExporter::testFixedM1VaryM2_shuffled(
-        fixed_m1, m2_sizes, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    ConvergenceExporter::exportToCSV("do_scheme_shuffled_m2", data_m2);
-    
-    // Test time step convergence
-    std::vector<int> N_steps = {10, 20, 30, 40, 50, 60, 70};
-    auto data_N = ConvergenceExporter::testVaryTimeSteps_shuffled(
-        100, 50, N_steps, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    ConvergenceExporter::exportTimeStepConvergenceToCSV("do_scheme_shuffled_N", data_N);
-}
 
 
 /*
@@ -1957,48 +1322,6 @@ void test_CS_scheme_call(){
     ResultsExporter::exportToCSV("heston_cs_scheme", grid, U);
 }
 
-void test_CS_convergence() {
-    // Market parameters
-    const double K = 100.0;
-    const double S_0 = 100.0;
-    const double V_0 = 0.04;
-    const double T = 1.0;
-    const double r_d = 0.025;
-    const double r_f = 0.0;
-    const double rho = -0.9;
-    const double sigma = 0.3;
-    const double kappa = 1.5;
-    const double eta = 0.04;
-    
-    const double ref_price = 8.8948693600540167;
-    
-    // Test m1 convergence
-    std::vector<int> m1_sizes = {50, 75, 100, 150};
-    int fixed_m2 = 50;
-    auto data_m1 = ConvergenceExporter::testFixedM2VaryM1(
-        fixed_m2, m1_sizes, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    ConvergenceExporter::exportToCSV("cs_scheme_m1", data_m1);
-    
-    // Test m2 convergence
-    std::vector<int> m2_sizes = {20, 50, 70, 75};
-    int fixed_m1 = 100;
-    auto data_m2 = ConvergenceExporter::testFixedM1VaryM2(
-        fixed_m1, m2_sizes, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    ConvergenceExporter::exportToCSV("cs_scheme_m2", data_m2);
-    
-    // Test time step convergence
-    std::vector<int> N_steps = {10, 20, 30, 40, 50, 60, 70};
-    auto data_N = ConvergenceExporter::testVaryTimeSteps(
-        100, 50, N_steps, ref_price,
-        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta
-    );
-    ConvergenceExporter::exportTimeStepConvergenceToCSV("cs_scheme_N", data_N);
-}
-
 void test_CS_shuffled() {
     // Test parameters
     double K = 100.0;
@@ -2319,6 +1642,97 @@ void test_MCS_shuffled() {
 }
 
 
+/*
+
+Test method for new convergence code
+
+*/
+void test_convergence() {
+    // Market parameters
+    const double K = 100.0;
+    const double S_0 = 100.0;
+    const double V_0 = 0.04;
+    const double T = 1.0;
+    const double r_d = 0.025;
+    const double r_f = 0.0;
+    const double rho = -0.9;
+    const double sigma = 0.3;
+    const double kappa = 1.5;
+    const double eta = 0.04;
+    
+    const double ref_price = 8.8948693600540167;
+    
+    // Test spatial grid convergence with m1 = 2*m2
+    std::vector<int> m2_sizes = {15, 25, 50, 75, 100, 125, 150};  // m1 will be 2*m2
+    
+    std::cout << "Starting convergence test with m1 = 2*m2" << std::endl;
+    
+    // Standard implementation test
+    auto data_standard = ConvergenceExporter::testWithRelatedGridSizes(
+        m2_sizes, ref_price,
+        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta,
+        false  // Don't use shuffled version
+    );
+    
+    ConvergenceExporter::exportToCSV("do_scheme_related_grids", data_standard);
+    
+    // Shuffled implementation test
+    auto data_shuffled = ConvergenceExporter::testWithRelatedGridSizes(
+        m2_sizes, ref_price,
+        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta,
+        true  // Use shuffled version
+    );
+    
+    ConvergenceExporter::exportToCSV("do_scheme_shuffled_related_grids", data_shuffled);
+    
+    // Test time step convergence with fixed grid size
+    std::vector<int> N_steps = {10, 20, 30, 40, 50, 60, 70};
+    int base_m2 = 50;  // This will make m1 = 100
+    
+    auto data_time_standard = ConvergenceExporter::testVaryTimeSteps(
+        base_m2, N_steps, ref_price,
+        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta,
+        false  // Don't use shuffled version
+    );
+    
+    ConvergenceExporter::exportTimeStepConvergenceToCSV("do_scheme_timestep", data_time_standard);
+    
+    auto data_time_shuffled = ConvergenceExporter::testVaryTimeSteps(
+        base_m2, N_steps, ref_price,
+        K, S_0, V_0, T, r_d, r_f, rho, sigma, kappa, eta,
+        true  // Use shuffled version
+    );
+    
+    ConvergenceExporter::exportTimeStepConvergenceToCSV("do_scheme_shuffled_timestep", data_time_shuffled);
+    
+    // Print results table for spatial convergence
+    std::cout << "\nSpatial Convergence Results (m1 = 2*m2):" << std::endl;
+    std::cout << "m2\tm1\tStandard Error\tStandard Time\tShuffled Error\tShuffled Time" << std::endl;
+    std::cout << "------------------------------------------------------------------------" << std::endl;
+    
+    for (size_t i = 0; i < m2_sizes.size(); ++i) {
+        std::cout << m2_sizes[i] << "\t" 
+                  << data_standard.m1_sizes[i] << "\t"
+                  << std::scientific << data_standard.errors[i] << "\t"
+                  << std::fixed << data_standard.times[i] << "s\t"
+                  << std::scientific << data_shuffled.errors[i] << "\t"
+                  << std::fixed << data_shuffled.times[i] << "s" << std::endl;
+    }
+    
+    // Print results table for time step convergence
+    std::cout << "\nTime Step Convergence Results (m1=" << 2*base_m2 << ", m2=" << base_m2 << "):" << std::endl;
+    std::cout << "N\tStandard Error\tStandard Time\tShuffled Error\tShuffled Time" << std::endl;
+    std::cout << "------------------------------------------------------------------------" << std::endl;
+    
+    for (size_t i = 0; i < N_steps.size(); ++i) {
+        std::cout << N_steps[i] << "\t"
+                  << std::scientific << data_time_standard.errors[i] << "\t"
+                  << std::fixed << data_time_standard.times[i] << "s\t"
+                  << std::scientific << data_time_shuffled.errors[i] << "\t"
+                  << std::fixed << data_time_shuffled.times[i] << "s" << std::endl;
+    }
+}
+
 void test_DO_scheme() {
     Kokkos::initialize();
         {
@@ -2329,8 +1743,6 @@ void test_DO_scheme() {
         */
         
         //test_heston_call();
-        //test_DO_m1_convergence();
-        //test_all_convergence();
         
         /*
 
@@ -2339,9 +1751,6 @@ void test_DO_scheme() {
         */
 
         //test_heston_call_shuffled();
-        //test_heston_call_shuffled_vary_m1();
-        //test_shuffled_convergence();
-        test_DO_shuffle_m2_convergence();
 
         //test_heston_american_call_shuffled();
         //test_lambda_american_call();
@@ -2360,7 +1769,6 @@ void test_DO_scheme() {
         */
         
         //test_CS_scheme_call();
-        //test_CS_convergence();
         //test_CS_shuffled();
         //test_CS_schuffled_implied_vol();
         
@@ -2370,6 +1778,13 @@ void test_DO_scheme() {
         
         */
         //test_MCS_shuffled();
+
+        /*
+        
+        convergence test
+        
+        */
+        test_convergence();
 
         } // All test objects destroyed here
     Kokkos::finalize();

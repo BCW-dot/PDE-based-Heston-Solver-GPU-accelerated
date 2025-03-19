@@ -55,11 +55,11 @@ void test_calibration_european(){
     const double eps = 1e-6;  // Perturbation size for finite difference approximation in Jacobian matrix
 
     // Setup strikes and market data
-    const int num_strikes = 30;
+    const int num_strikes = 60;
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.7 + i * 0.5;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
+        strikes[i] = S_0 * 0.7 + i * 1;//S_0 * (0.5 + i * 0.01); //S_0 - num_strikes + i;  // Strikes
         std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
@@ -428,7 +428,8 @@ void test_calibration_european(){
     std::cout << "v₀ = " << current_v0 << std::endl;
     std::cout << "final error = " << final_error << std::endl;
     std::cout << "total iterations = " << iteration_count << std::endl;
-    std::cout << "Total PDE solves: " << num_strikes * (1 + 5 + 1) * iteration_count << std::endl;
+    int total_pde_solves = num_strikes * (1 + 5 + 1) * iteration_count - num_strikes;
+    std::cout << "Total PDE solves: " << total_pde_solves << std::endl;
 
     auto t_end_second = timer::now();
     std::cout << "Total time after Updating parameters: "
@@ -484,6 +485,7 @@ void test_calibration_european(){
         << " options, Time=" << total_time 
         << " s, FinalError=" << final_error
         << ", iterationCount=" << iteration_count
+        << ", TotalPdeSolves=" << total_pde_solves
         << ", init_kappa=" << kappa
         << ", init_eta="  << eta
         << ", init_sigma="<< sigma
@@ -2461,7 +2463,7 @@ void test_calibration_european_multi_maturity(){
 
     // Setup maturity, strikes and market data
     //each maturity has the same amount of strikes and the same strike values
-    const int num_maturities = 5;
+    const int num_maturities = 1;
     const int num_strikes = 60;
 
     const int total_calibration_size = num_maturities*num_strikes;
@@ -2469,7 +2471,7 @@ void test_calibration_european_multi_maturity(){
     std::vector<double> maturities(num_maturities);
     std::cout << "Maturities: ";
     for(int i = 0; i < num_maturities; ++i) {
-        //maturities[i] = 0.8 + i * 0.1;
+        maturities[i] = 1 + i * 0.2;//0.8 + i * 0.1;
 
         // Weekly maturities for first 12 weeks, then bi-weekly up to 3 months
         /*
@@ -2485,12 +2487,13 @@ void test_calibration_european_multi_maturity(){
 
 
         // Quarterly for first 2 years, then semi-annually up to 5 years
-        
+        /*
         if (i < 8) {
             maturities[i] = 1.0 + i * 0.25; // Quarterly (in years) starting at 1 year
         } else {
             maturities[i] = 3.0 + (i-8) * 0.5; // Semi-annually after 3 years
         }
+        */
         
 
         std::cout << maturities[i] << ", ";
@@ -2501,12 +2504,12 @@ void test_calibration_european_multi_maturity(){
     std::cout << "Strikes: ";
     double strike_width = 1.0; // Percentage of spot
     for(int i = 0; i < num_strikes; ++i) {
-        //strikes[i] = S_0 * 0.7 + i * 0.5;
+        strikes[i] = S_0 * 0.7 + i * 1;
 
         // Center around S_0 with finer spacing near the money
-        double percent_away = strike_width * (i - num_strikes/2);
-        strikes[i] = S_0 * (1.0 + percent_away/100.0);
-        std::cout << strikes[i] << ", ";
+        //double percent_away = strike_width * (i - num_strikes/2);
+        //strikes[i] = S_0 * (1.0 + percent_away/100.0);
+        //std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
@@ -2545,7 +2548,7 @@ void test_calibration_european_multi_maturity(){
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     //look isnide claibration delta check
     const int max_iter = 15;
-    const double tol = 1.0;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
+    const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
 
 
     std::cout << "Computing Jacobian for " << num_maturities << " maturities and " << num_strikes << " strikes\n";
@@ -3170,7 +3173,7 @@ void test_DEVICE_calibration_european(){
 void test_heston_calibration(){
   Kokkos::initialize();
   {
-    //test_calibration_european();
+    test_calibration_european();
     //test_calibration_american();
     //test_calibration_dividends();
     //test_calibration_american_dividends();
