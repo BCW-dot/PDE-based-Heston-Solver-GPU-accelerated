@@ -2463,7 +2463,7 @@ void test_calibration_european_multi_maturity(){
 
     // Setup maturity, strikes and market data
     //each maturity has the same amount of strikes and the same strike values
-    const int num_maturities = 1;
+    const int num_maturities = 3;
     const int num_strikes = 60;
 
     const int total_calibration_size = num_maturities*num_strikes;
@@ -2471,7 +2471,7 @@ void test_calibration_european_multi_maturity(){
     std::vector<double> maturities(num_maturities);
     std::cout << "Maturities: ";
     for(int i = 0; i < num_maturities; ++i) {
-        maturities[i] = 1 + i * 0.2;//0.8 + i * 0.1;
+        maturities[i] = 1 + i * 0.5;//0.8 + i * 0.1;
 
         // Weekly maturities for first 12 weeks, then bi-weekly up to 3 months
         /*

@@ -35,13 +35,13 @@ struct Device_A1_heston {
     KOKKOS_FUNCTION Device_A1_heston() = default;
 
     Device_A1_heston(int m1_in, int m2_in) : m1(m1_in), m2(m2_in) {
-        main_diags = Kokkos::View<double**>("A1_main_diags", m2+1, m1+1);
-        lower_diags = Kokkos::View<double**>("A1_lower_diags", m2+1, m1);
-        upper_diags = Kokkos::View<double**>("A1_upper_diags", m2+1, m1);
+        main_diags = Kokkos::View<double**, DeviceType>("A1_main_diags", m2+1, m1+1);
+        lower_diags = Kokkos::View<double**, DeviceType>("A1_lower_diags", m2+1, m1);
+        upper_diags = Kokkos::View<double**, DeviceType>("A1_upper_diags", m2+1, m1);
 
-        impl_main_diags = Kokkos::View<double**>("A1_impl_main_diags", m2+1, m1+1);
-        impl_lower_diags = Kokkos::View<double**>("A1_impl_lower_diags", m2+1, m1);
-        impl_upper_diags = Kokkos::View<double**>("A1_impl_upper_diags", m2+1, m1);
+        impl_main_diags = Kokkos::View<double**, DeviceType>("A1_impl_main_diags", m2+1, m1+1);
+        impl_lower_diags = Kokkos::View<double**, DeviceType>("A1_impl_lower_diags", m2+1, m1);
+        impl_upper_diags = Kokkos::View<double**, DeviceType>("A1_impl_upper_diags", m2+1, m1);
 
         temp_para = Kokkos::View<double**>("temp_para", m2+1, m1+1);
     }

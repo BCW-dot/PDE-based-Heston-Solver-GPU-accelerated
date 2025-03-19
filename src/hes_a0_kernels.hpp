@@ -22,7 +22,7 @@ struct Device_A0_heston {
 
     KOKKOS_FUNCTION Device_A0_heston() = default;
     Device_A0_heston(int m1_in, int m2_in) : m1(m1_in), m2(m2_in) {
-        values = Kokkos::View<double**>("A0_values", m2 - 1, (m1 - 1) * 9);
+        values = Kokkos::View<double**, DeviceType>("A0_values", m2 - 1, (m1 - 1) * 9);
     }
 
     template<class GridType>

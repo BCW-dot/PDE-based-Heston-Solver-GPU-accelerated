@@ -79,23 +79,23 @@ struct Device_A2_shuffled_heston {
     KOKKOS_FUNCTION Device_A2_shuffled_heston() = default;
     Device_A2_shuffled_heston(int m1_in, int m2_in): m1(m1_in), m2(m2_in) {
         // Allocate explicit system diagonals
-        main_diags = Kokkos::View<double**>("A2_main_diags", m1+1, m2+1);
-        lower_diags = Kokkos::View<double**>("A2_lower_diags", m1+1, m2);
-        lower2_diags = Kokkos::View<double**>("A2_lower2_diags", m1+1, m2-1);
-        upper_diags = Kokkos::View<double**>("A2_upper_diags", m1+1, m2);
-        upper2_diags = Kokkos::View<double**>("A2_upper2_diags", m1+1, m2-1);
+        main_diags = Kokkos::View<double**, DeviceType>("A2_main_diags", m1+1, m2+1);
+        lower_diags = Kokkos::View<double**, DeviceType>("A2_lower_diags", m1+1, m2);
+        lower2_diags = Kokkos::View<double**, DeviceType>("A2_lower2_diags", m1+1, m2-1);
+        upper_diags = Kokkos::View<double**, DeviceType>("A2_upper_diags", m1+1, m2);
+        upper2_diags = Kokkos::View<double**, DeviceType>("A2_upper2_diags", m1+1, m2-1);
         
         // Allocate implicit system diagonals
-        impl_main_diags = Kokkos::View<double**>("A2_impl_main_diags", m1+1, m2+1);
-        impl_lower_diags = Kokkos::View<double**>("A2_impl_lower_diags", m1+1, m2);
-        impl_lower2_diags = Kokkos::View<double**>("A2_impl_lower2_diags", m1+1, m2-1);
-        impl_upper_diags = Kokkos::View<double**>("A2_impl_upper_diags", m1+1, m2);
-        impl_upper2_diags = Kokkos::View<double**>("A2_impl_upper2_diags", m1+1, m2-1);
+        impl_main_diags = Kokkos::View<double**, DeviceType>("A2_impl_main_diags", m1+1, m2+1);
+        impl_lower_diags = Kokkos::View<double**, DeviceType>("A2_impl_lower_diags", m1+1, m2);
+        impl_lower2_diags = Kokkos::View<double**, DeviceType>("A2_impl_lower2_diags", m1+1, m2-1);
+        impl_upper_diags = Kokkos::View<double**, DeviceType>("A2_impl_upper_diags", m1+1, m2);
+        impl_upper2_diags = Kokkos::View<double**, DeviceType>("A2_impl_upper2_diags", m1+1, m2-1);
         
         // Allocate temporary storage for implicit solve
-        c_prime = Kokkos::View<double**>("A2_c_prime", m1+1, m2+1);
-        c2_prime = Kokkos::View<double**>("A2_c2_prime", m1+1, m2+1);
-        d_prime = Kokkos::View<double**>("A2_d_prime", m1+1, m2+1);
+        c_prime = Kokkos::View<double**, DeviceType>("A2_c_prime", m1+1, m2+1);
+        c2_prime = Kokkos::View<double**, DeviceType>("A2_c2_prime", m1+1, m2+1);
+        d_prime = Kokkos::View<double**, DeviceType>("A2_d_prime", m1+1, m2+1);
     }
 
     template<class GridType>

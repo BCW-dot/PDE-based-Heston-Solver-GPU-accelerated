@@ -2023,10 +2023,10 @@ void test_device_class() {
     //test_DEVICE_parallel_DO_scheme();  
     //test_parallel_DO_method();  
 
-    //test_deviceCallable_Do_solver();
+    test_deviceCallable_Do_solver();
     //test_deviceCallable_Do_solver_american();
     //test_deviceCallable_Do_solver_dividend();
-    test_deviceCallable_Do_solver_american_dividend();
+    //test_deviceCallable_Do_solver_american_dividend();
 
   }
   Kokkos::finalize();
