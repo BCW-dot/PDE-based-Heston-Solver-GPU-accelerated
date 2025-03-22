@@ -793,6 +793,7 @@ void device_DO_timestepping_american_dividend(
         }
         team.team_barrier();
     
+
     //sequential div handling
     /*
     const int total_size = (m1+1)*(m2+1);
