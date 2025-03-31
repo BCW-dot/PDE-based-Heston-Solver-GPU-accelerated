@@ -1390,7 +1390,7 @@ void test_A2_implementations() {
     // Create grid using existing helper function
     Grid grid = create_test_grid(m1, m2);
     
-    // Parameters (same as Python)
+    // Parameters 
     double rho = -0.9;
     double sigma = 0.3;
     double r_d = 0.025;

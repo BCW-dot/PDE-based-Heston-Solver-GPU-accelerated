@@ -245,10 +245,7 @@ void test_heston_A1() {
 }   
 
 
-//This test compare the explicit and implicit output of a simple test case vector. It is compared to the python implementation
-//and checked that the outputs align. This test was written when i saw oszillatory behavior in the m1 direction when increasing
-//this dimension size
-//RESULT OF TEST: No discrepencies between ypthon and c++
+//This test compare the explicit and implicit output of a simple test case vector. 
 void test_A1_structure() {
     // Test dimensions
     int m1 = 4;  // Small dimensions for readable output
