@@ -3356,6 +3356,12 @@ void test_calibration_american_divident_multi_maturity(){
 
     //CONVERGENCE CHEKC CHANGED!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    /*
+    
+    rly check it!
+    
+    */
     //look isnide claibration delta check
     const int max_iter = 20;
     const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
@@ -4060,8 +4066,8 @@ void test_heston_calibration(){
     Calibrates multiple maturities of strikes
     
     */
-    //test_calibration_european_multi_maturity();
-    test_calibration_american_divident_multi_maturity();
+    test_calibration_european_multi_maturity();
+    //test_calibration_american_divident_multi_maturity();
   }
   Kokkos::finalize();
 }

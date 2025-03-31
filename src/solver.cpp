@@ -87,6 +87,7 @@ class ConvergenceExporter {
                 // Setup grid and matrices
                 int m = (m1 + 1) * (m2 + 1);
                 Grid grid(m1, 8*K, S_0, K, K/5, m2, 5.0, V_0, 5.0/500);
+                //Grid grid = create_uniform_grid(m1, m2,  S_0, V_0, 0.0, 800.0, 0.0, 5.0);
                 
                 // Initialize matrices
                 heston_A0Storage_gpu A0(m1, m2);
@@ -158,6 +159,7 @@ class ConvergenceExporter {
                 int index_s = std::find(grid.Vec_s.begin(), grid.Vec_s.end(), S_0) - grid.Vec_s.begin();
                 int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
                 double price = h_U[index_s + index_v*(m1+1)];
+                std::cout << "price: " << price << std::endl;
                 
                 // Store results
                 data.times.push_back(averageTime);
@@ -329,8 +331,8 @@ void test_heston_call(){
     const double eta = 0.04;
     
     // Test parameters matching Python version
-    const int m1 = 50;
-    const int m2 = 25;
+    const int m1 = 100;
+    const int m2 = 75;
     std::cout << "Dimesnion StockxVariance: " << m1+1 << "x" << m2+1 << std::endl;
 
     const int m = (m1 + 1) * (m2 + 1);
@@ -428,12 +430,12 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 50;
-    int m2 = 25;
+    int m1 = 20;
+    int m2 = 15;
 
     int m = (m1 + 1) * (m2 + 1);
 
-    int N = 20;
+    int N = 15;
     double theta = 0.8;
 
     std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
@@ -496,8 +498,8 @@ void test_heston_call_shuffled() {
     double option_price = h_U[index_s + index_v*(m1+1)];
 
     // Compare with reference price (from Python/Monte Carlo)
-    const double reference_price = compute_MC_heston_call_price(S_0,V_0,K,r_d,r_f,rho,sigma,kappa,eta,T);//8.8948693600540167;
-    
+    const double reference_price = 8.8948693600540167;//compute_MC_heston_call_price(S_0,V_0,K,r_d,r_f,rho,sigma,kappa,eta,T);//8.8948693600540167;
+    //std::cout << reference_price << std::endl;
     std::cout << std::setprecision(16) << "Shuffled DO scheme price " << option_price << std::endl;
     std::cout << "Shuffled DO scheme Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
     std::cout << "Shuffled DO scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
@@ -1667,6 +1669,7 @@ void test_convergence() {
     
     std::cout << "Starting convergence test with m1 = 2*m2" << std::endl;
     
+    
     // Standard implementation test
     auto data_standard = ConvergenceExporter::testWithRelatedGridSizes(
         m2_sizes, ref_price,
@@ -1676,6 +1679,7 @@ void test_convergence() {
     
     ConvergenceExporter::exportToCSV("do_scheme_related_grids", data_standard);
     
+
     // Shuffled implementation test
     auto data_shuffled = ConvergenceExporter::testWithRelatedGridSizes(
         m2_sizes, ref_price,
@@ -1686,6 +1690,7 @@ void test_convergence() {
     ConvergenceExporter::exportToCSV("do_scheme_shuffled_related_grids", data_shuffled);
     
     // Test time step convergence with fixed grid size
+    /*
     std::vector<int> N_steps = {10, 20, 30, 40, 50, 60, 70};
     int base_m2 = 50;  // This will make m1 = 100
     
@@ -1731,8 +1736,17 @@ void test_convergence() {
                   << std::scientific << data_time_shuffled.errors[i] << "\t"
                   << std::fixed << data_time_shuffled.times[i] << "s" << std::endl;
     }
+    */
 }
 
+
+
+
+/*
+
+Calls the above tests
+
+*/
 void test_DO_scheme() {
     Kokkos::initialize();
         {
@@ -1750,7 +1764,7 @@ void test_DO_scheme() {
 
         */
 
-        //test_heston_call_shuffled();
+        test_heston_call_shuffled();
 
         //test_heston_american_call_shuffled();
         //test_lambda_american_call();
@@ -1784,7 +1798,7 @@ void test_DO_scheme() {
         convergence test
         
         */
-        test_convergence();
+        //test_convergence();
 
         } // All test objects destroyed here
     Kokkos::finalize();
