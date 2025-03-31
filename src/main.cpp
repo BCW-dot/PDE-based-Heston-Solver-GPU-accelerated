@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
     /*
     Tests the Douglas scheme for various option types, on the CPU with GPU accaleration
     */
-    //test_DO_scheme();
+    test_DO_scheme();
 
     /*
     

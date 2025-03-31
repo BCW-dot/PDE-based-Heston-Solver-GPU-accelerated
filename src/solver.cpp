@@ -396,7 +396,7 @@ void test_heston_call(){
     double option_price = h_U[index_s + index_v*(m1+1)];
 
     // Compare with reference price (from Python/Monte Carlo)
-    const double reference_price = 8.8948693600540167;
+    const double reference_price = 8.8943383103218502;
     std::cout << std::setprecision(16) << option_price << std::endl;
     std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
     
@@ -430,12 +430,12 @@ void test_heston_call_shuffled() {
     double kappa = 1.5;
     double eta = 0.04;
 
-    int m1 = 20;
-    int m2 = 15;
+    int m1 = 50;
+    int m2 = 25;
 
     int m = (m1 + 1) * (m2 + 1);
 
-    int N = 15;
+    int N = 20;
     double theta = 0.8;
 
     std::cout << "Dimesnions: stock = " << m1 << ", variance = " << m2 << std::endl;
@@ -497,8 +497,9 @@ void test_heston_call_shuffled() {
 
     double option_price = h_U[index_s + index_v*(m1+1)];
 
-    // Compare with reference price (from Python/Monte Carlo)
-    const double reference_price = 8.8948693600540167;//compute_MC_heston_call_price(S_0,V_0,K,r_d,r_f,rho,sigma,kappa,eta,T);//8.8948693600540167;
+    // Compare with reference price (Monte Carlo)
+    //const int M = 1000000;
+    const double reference_price = 8.8943383103218502;//compute_MC_heston_call_price(S_0,V_0,K,r_d,r_f,rho,sigma,kappa,eta,T, M);//8.8948693600540167;
     //std::cout << reference_price << std::endl;
     std::cout << std::setprecision(16) << "Shuffled DO scheme price " << option_price << std::endl;
     std::cout << "Shuffled DO scheme Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
@@ -598,7 +599,7 @@ void test_heston_american_call_shuffled() {
     double option_price = h_U[index_s + index_v*(m1+1)];
 
     // Compare with reference price (from Python/Monte Carlo)
-    const double reference_price = 8.8948693600540167;
+    const double reference_price = 8.8943383103218502;
     std::cout << std::setprecision(16) << option_price << std::endl;
     std::cout << "Absolut error: " << std::abs(option_price - reference_price) << std::endl;///reference_price << std::endl;
     std::cout << "Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
@@ -1316,8 +1317,8 @@ void test_CS_scheme_call(){
     int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
     double option_price = h_U[index_s + index_v*(m1+1)];
 
-    // Compare with reference price (from Python/Monte Carlo)
-    const double reference_price = 8.8948693600540167;
+    // Compare with reference price (Monte Carlo)
+    const double reference_price = 8.8943383103218502;
     std::cout << "CS_scheme price: " << std::setprecision(12) << option_price << std::endl;
     std::cout << "CS_ scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
     //EXPECT_NEAR(option_price, reference_price, 0.1);
@@ -1401,8 +1402,8 @@ void test_CS_shuffled() {
     int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
     double option_price = h_U[index_s + index_v*(m1+1)];
 
-    // Compare with reference price (from Python/Monte Carlo)
-    const double reference_price = 8.8948693600540167;
+    // Compare with reference price (Monte Carlo)
+    const double reference_price = 8.8943383103218502;
     std::cout << "CS_scheme price: " << std::setprecision(16) << option_price << std::endl;
     std::cout << "CS_scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
     //EXPECT_NEAR(option_price, reference_price, 0.1);
@@ -1485,8 +1486,8 @@ void test_CS_schuffled_implied_vol(){
 
     double option_price = h_U[index_s + index_v*(m1+1)];
 
-    // Compare with reference price (from Python/Monte Carlo)
-    const double reference_price = 8.8948693600540167;
+    // Compare with reference price (Monte Carlo)
+    const double reference_price = 8.8943383103218502;
     std::cout << "CS_scheme price: " << std::setprecision(12) << option_price << std::endl;
     //std::cout << "CS_scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
     
@@ -1635,8 +1636,8 @@ void test_MCS_shuffled() {
     int index_v = std::find(grid.Vec_v.begin(), grid.Vec_v.end(), V_0) - grid.Vec_v.begin();
     double option_price = h_U[index_s + index_v*(m1+1)];
 
-    // Compare with reference price (from Python/Monte Carlo)
-    const double reference_price = 8.8948693600540167;
+    // Compare with reference price (Monte Carlo)
+    const double reference_price = 8.8943383103218502;
     std::cout << "MCS_scheme price: " << std::setprecision(16) << option_price << std::endl;
     std::cout << "MCS_scheme Relative error: " << std::abs(option_price - reference_price)/reference_price << std::endl;
     //EXPECT_NEAR(option_price, reference_price, 0.1);
