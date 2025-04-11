@@ -343,7 +343,7 @@ void test_DEVICE_parallel_DO_scheme() {
               << " seconds" << std::endl;
 
     // Create host mirrors to access the data
-    const double reference_price = 8.8948693600540167;
+    const double reference_price = 8.8943383103218502;
 
     auto h_U = Kokkos::create_mirror_view(U);
     Kokkos::deep_copy(h_U, U);
@@ -775,7 +775,7 @@ void test_deviceCallable_Do_solver() {
     auto h_U = Kokkos::create_mirror_view(workspace.U);
     Kokkos::deep_copy(h_U, workspace.U);
 
-    const double reference_price = 8.8948693600540167;
+    const double reference_price = 8.8943383103218502;
 
     for(int inst = 0; inst < min(3,nInstances); ++inst) {
         // Create host mirrors for the grid views

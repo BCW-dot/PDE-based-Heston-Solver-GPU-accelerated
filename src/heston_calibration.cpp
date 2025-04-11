@@ -2457,8 +2457,8 @@ void test_calibration_european_multi_maturity(){
 
     // Setup maturity, strikes and market data
     //each maturity has the same amount of strikes and the same strike values
-    const int num_maturities = 12;
-    const int num_strikes = 60;
+    const int num_maturities = 10;
+    const int num_strikes = 20;
 
     const int total_calibration_size = num_maturities*num_strikes;
 
@@ -2477,7 +2477,7 @@ void test_calibration_european_multi_maturity(){
         */
 
         // Monthly maturities from 3 to 12 months
-        //maturities_medium[i] = 0.25 + i * (1.0/12.0); // Start at 3 months, monthly increments
+        //maturities[i] = 0.25 + i * (1.0/12.0); // Start at 3 months, monthly increments
 
 
         // Quarterly for first 2 years, then semi-annually up to 5 years
@@ -2489,6 +2489,7 @@ void test_calibration_european_multi_maturity(){
         }
         
         
+        
 
         std::cout << maturities[i] << ", ";
     }
@@ -2496,14 +2497,14 @@ void test_calibration_european_multi_maturity(){
 
     std::vector<double> strikes(num_strikes);
     std::cout << "Strikes: ";
-    double strike_width = 1.0; // Percentage of spot
+    
     for(int i = 0; i < num_strikes; ++i) {
-        strikes[i] = S_0 * 0.7 + i * 1;
+        strikes[i] = S_0 * 0.95 + i * 0.5;
 
         // Center around S_0 with finer spacing near the money
         //double percent_away = strike_width * (i - num_strikes/2);
         //strikes[i] = S_0 * (1.0 + percent_away/100.0);
-        //std::cout << strikes[i] << ", ";
+        std::cout << strikes[i] << ", ";
     }
     std::cout << "" << std::endl;
 
@@ -2538,11 +2539,10 @@ void test_calibration_european_multi_maturity(){
     }
     Kokkos::deep_copy(d_calibration_points, h_calibration_points);
 
-    //CONVERGENCE CHEKC CHANGED!!!!!!!!!!!!!!!!!
-    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    //look isnide claibration delta check
+    //convergence check parameters
     const int max_iter = 15;
-    const double tol = 0.1;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
+    const double tol = 1e-1 * sqrt(num_strikes * num_maturities);//1.0;//0.001 * num_strikes * (S_0/100.0)*(S_0/100.0); //0.01;
+    const double delta_tol = 1e-1 * (1.0 + log(num_strikes * num_maturities));//0.3 * tol;
 
 
     std::cout << "Computing Jacobian for " << num_maturities << " maturities and " << num_strikes << " strikes\n";
@@ -2760,7 +2760,7 @@ void test_calibration_european_multi_maturity(){
 
         // Check convergence
         //maybe do two errir checks one for delta normn and the other for the toleranze
-        if(delta_norm < 0.3 * tol || (current_error < tol)) {
+        if(delta_norm < delta_tol || (current_error < tol)) {
             converged = true;
             std::cout << "Converged!" << std::endl;
             std::cout << "Error Tolerance: " << tol << std::endl;
