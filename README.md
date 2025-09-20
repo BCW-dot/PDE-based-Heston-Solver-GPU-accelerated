@@ -14,7 +14,9 @@ This framework can price American and European options, supporting underlyings t
 Key Features
 
 Single European Option: 0.003s (A100RTX 2080)
+
 500 American Options with Dividends: 0.02s (A100)
+
 GPU Speedup vs CPU: 30x
 
 
