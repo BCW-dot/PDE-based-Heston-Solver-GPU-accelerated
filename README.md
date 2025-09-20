@@ -10,16 +10,22 @@ This framework can price American and European options, supporting underlyings t
 Performance Benchmarks
 This framework can price American and European options, supporting underlyings that pay dividends.
 
-<img width="855" height="233" alt="image" src="https://github.com/user-attachments/assets/d9885381-fc8d-4f52-b015-68ec553dc518" />
+<img width="972" height="694" alt="image" src="https://github.com/user-attachments/assets/c7a77b51-1c52-45e4-b804-f300c12e0069" />
 
 Key Features
 
-Single European Option: 0.003s (RTX 2080)
+Single European Option: 0.003s (A100RTX 2080)
 500 American Options with Dividends: 0.02s (A100)
-GPU Speedup vs CPU: 18.20x
+GPU Speedup vs CPU: 30x
+
+
 Real-time Heston Calibration: GPU-accelerated Levenberg-Marquardt algorithm
+
+<img width="942" height="592" alt="image" src="https://github.com/user-attachments/assets/6448a156-499b-4e02-9605-5359ff94dc00" />
+
+
 Supported Option Types: European/American calls and puts, with and without dividends
-Stochastic Volatility Models: Heston and Scott-Chesney models
+Stochastic Volatility Models: Heston (done) and Scott-Chesney model (easily extendable)
 
 Technical Presentation
 I presented the following slides at DK Investment Bank:
@@ -29,8 +35,11 @@ I presented the following slides at DK Investment Bank:
 References
 
 Haentjens, T. & in 't Hout, K.J. (2018). "ADI schemes for pricing American options under the Heston model"
+
 Buehler, H. (2018). "Volatility and Dividends II: Consistent Cash Dividends", J.P. Morgan QR
+
 in 't Hout, K.J. & Foulon, S. "ADI Finite Difference Schemes for Option Pricing in the Heston Model with Correlation"
+
 Douglas, J. (1962). "Alternating direction methods for three space variables"
 
 
