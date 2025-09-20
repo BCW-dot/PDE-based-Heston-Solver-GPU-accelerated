@@ -13,7 +13,7 @@ This framework can price American and European options, supporting underlyings t
 
 Key Features
 
-Single European Option: 0.003s (A100RTX 2080)
+Single European Option: 0.003s (A100) / 0.008 (RTX2080)
 
 500 American Options with Dividends: 0.02s (A100)
 
