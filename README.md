@@ -24,6 +24,8 @@ Stochastic Volatility Models: Heston and Scott-Chesney models
 Technical Presentation
 I presented the following slides at DK Investment Bank:
 [DK_Bank.pdf](https://github.com/user-attachments/files/22441146/DK_Bank.pdf)
+
+
 References
 
 Haentjens, T. & in 't Hout, K.J. (2018). "ADI schemes for pricing American options under the Heston model"
