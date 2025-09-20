@@ -4,6 +4,7 @@ A good starting point to understand the theory behind this codebase is my Reddit
 https://www.reddit.com/r/quant/comments/1kj9kle/project_interactive_gpuaccelerated_pde_solver_for/
 
 Performance Benchmarks
+
 This framework can price American and European options, supporting underlyings that pay dividends.
 
 <img width="972" height="694" alt="image" src="https://github.com/user-attachments/assets/c7a77b51-1c52-45e4-b804-f300c12e0069" />
