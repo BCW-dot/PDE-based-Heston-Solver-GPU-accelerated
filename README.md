@@ -2,11 +2,8 @@ GPU-Accelerated PDE-Based Option Pricing Framework
 This codebase is part of my Master's Thesis in Mathematics. The main goal was to develop high-performance computing solutions for option pricing and stochastic model calibration in real-time to market data. The numerical approach uses PDE-based methods for option pricing and the Levenberg-Marquardt algorithm for calibration.
 A good starting point to understand the theory behind this codebase is my Reddit post:
 https://www.reddit.com/r/quant/comments/1kj9kle/project_interactive_gpuaccelerated_pde_solver_for/
-Performance Benchmarks
-This framework can price American and European options, supporting underlyings that pay dividends.
 
 Performance Benchmarks
-
 This framework can price American and European options, supporting underlyings that pay dividends.
 
 <img width="972" height="694" alt="image" src="https://github.com/user-attachments/assets/c7a77b51-1c52-45e4-b804-f300c12e0069" />
