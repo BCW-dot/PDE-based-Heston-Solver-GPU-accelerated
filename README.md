@@ -1,23 +1,35 @@
-This Code Base is Part of my Master Thesis in Mathematics. The main gaol was to write HPC for Option PRicing and stochastic model calibration in real time to market Data. The numerical approach was to use a PDE based approach for Option pricing and the Leveneberg Marquart algorithm for the calibration. 
-
-A good start to understand the theory behind this code base is my Reddit Post:
-
+GPU-Accelerated PDE-Based Option Pricing Framework
+This codebase is part of my Master's Thesis in Mathematics. The main goal was to develop high-performance computing solutions for option pricing and stochastic model calibration in real-time to market data. The numerical approach uses PDE-based methods for option pricing and the Levenberg-Marquardt algorithm for calibration.
+A good starting point to understand the theory behind this codebase is my Reddit post:
 https://www.reddit.com/r/quant/comments/1kj9kle/project_interactive_gpuaccelerated_pde_solver_for/
+Performance Benchmarks
+This framework can price American and European options, supporting underlyings that pay dividends.
 
-For the Performance Benchmarks see the following:
-This Code can price American and European Options, supporting an unerlying paying dividends.
+
+
+Performance Benchmarks
+This framework can price American and European options, supporting underlyings that pay dividends.
+
 <img width="855" height="233" alt="image" src="https://github.com/user-attachments/assets/d9885381-fc8d-4f52-b015-68ec553dc518" />
 
-I presented the following slides at DK Investment Bank.
+Key Features
 
+Single European Option: 0.003s (RTX 2080)
+500 American Options with Dividends: 0.02s (A100)
+GPU Speedup vs CPU: 18.20x
+Real-time Heston Calibration: GPU-accelerated Levenberg-Marquardt algorithm
+Supported Option Types: European/American calls and puts, with and without dividends
+Stochastic Volatility Models: Heston and Scott-Chesney models
+
+Technical Presentation
+I presented the following slides at DK Investment Bank:
 [DK_Bank.pdf](https://github.com/user-attachments/files/22441146/DK_Bank.pdf)
+References
 
-
-
-
-
-References:
 Haentjens, T. & in 't Hout, K.J. (2018). "ADI schemes for pricing American options under the Heston model"
 Buehler, H. (2018). "Volatility and Dividends II: Consistent Cash Dividends", J.P. Morgan QR
 in 't Hout, K.J. & Foulon, S. "ADI Finite Difference Schemes for Option Pricing in the Heston Model with Correlation"
 Douglas, J. (1962). "Alternating direction methods for three space variables"
+
+
+
